@@ -1,0 +1,1 @@
+0 * * * * /usr/bin/python3 /var/marcus/bitchute/bc_collector.py >> ~/cron.log 2>&1
