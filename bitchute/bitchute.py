@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 from dateutil import parser
 from datetime import datetime
 
@@ -45,7 +46,7 @@ class Crawler():
         self.profile_base = 'https://www.bitchute.com/profile/{}/'
     
     def call(self, url, click_link_text=None, scroll=True):
-        wd = webdriver.Chrome(options=self.options)
+        wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
         print('Retrieving: ' + url + ' ', end='')
         self.set_status('Retrieving: ' + url)
 
