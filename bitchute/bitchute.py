@@ -22,6 +22,7 @@
 
 import time
 import datetime
+import markdownify
 import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -191,6 +192,8 @@ class Crawler():
                 owner_link = soup.find(class_='owner').find('a').get('href')
             if soup.find(id='channel-description'):
                 description = soup.find(id='channel-description').decode_contents()
+                description = description.strip('\n')
+                description = markdownify.markdownify(description)
                 for link in soup.find(id='channel-description').find_all('a'):
                     description_links.append(link.get('href'))
             if soup.find(class_='social'):
@@ -236,6 +239,8 @@ class Crawler():
                         link = None
                     if video.find(class_='channel-videos-text'):
                         description = video.find(class_='channel-videos-text').decode_contents()
+                        description = description.strip('\n')
+                        description = markdownify.markdownify(description)
                         description_links = [a.get('href') for a in video.find(class_='channel-videos-text').find_all('a')]
                     else:
                         description = None
