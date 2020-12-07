@@ -45,8 +45,10 @@ class Crawler():
         self.channel_base = 'https://www.bitchute.com/channel/{}/'
         self.video_base = 'https://www.bitchute.com/video/{}/'
         self.profile_base = 'https://www.bitchute.com/profile/{}/'
+        self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
+        
     
-    def call(self, url, click_link_text=None, scroll=True):
+    def call(self, url, click_link_text=None, scroll=True, top=None):
         wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
         print('Retrieving: ' + url + ' ', end='')
         self.set_status('Retrieving: ' + url)
@@ -56,6 +58,7 @@ class Crawler():
         #return wd
 
         if len(wd.find_elements_by_xpath('//button[normalize-space()="Dismiss"]')) > 0:
+            time.sleep(2)
             wd.find_element_by_xpath('//button[normalize-space()="Dismiss"]').click()
             
         if click_link_text and not len(wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
@@ -75,6 +78,16 @@ class Crawler():
             time.sleep(2)
 
         if scroll:
+            if top:
+                iterations = (top//10) + (top % 10 > 0)
+                iteration = 1
+                increment = 1
+
+            else:
+                iterations = 1
+                iteration = 0
+                increment = 0
+
             script = (
                 'window.scrollTo(0, document.body.scrollHeight);'
                 'var lenOfPage=document.body.scrollHeight;'
@@ -83,7 +96,8 @@ class Crawler():
 
             lenOfPage = wd.execute_script(script)
             match = False
-            while not match:
+            while not match and iteration < iterations:
+                iteration += increment
                 print('.', end='')
                 self.set_status('.')
                 lastCount = lenOfPage
@@ -121,6 +135,58 @@ class Crawler():
                 channels = pd.DataFrame(channels, columns=columns)
                 channels = channels.drop_duplicates(subset=['id'])
             return channels
+
+        
+        elif type == 'video_search':
+            videos = []
+            soup = BeautifulSoup(src, 'html.parser')
+            if soup.find(class_='results-list'):
+                counter = 0
+                for result in soup.find(class_='results-list').find_all(class_='video-result-container'):
+                    counter += 1
+                    title = None
+                    id_ = None
+                    view_count = None
+                    duration = None
+                    channel = None
+                    channel_url = None
+                    description = None
+                    description_links = []
+                    created_at = None
+
+                    if result.find(class_='video-result-title'):
+                        title = result.find(class_='video-result-title').text
+                        id_ = result.find(class_='video-result-title').find('a').get('href').split('/')[-2]
+
+                    if result.find(class_='video-views'):
+                        view_count = result.find(class_='video-views').text.strip()
+
+                    if result.find(class_='video-duration'):
+                        duration = result.find(class_='video-duration').text.strip()
+
+                    if result.find(class_='video-result-channel'):
+                        channel = result.find(class_='video-result-channel').text
+                        channel_url = result.find(class_='video-result-channel').find('a').get('href')
+
+                    if result.find(class_='video-result-text'):
+                        description = result.find(class_='video-result-text').decode_contents()
+                        description = description.strip('\n')
+                        description = markdownify.markdownify(description)
+
+                        for link in result.find(class_='video-result-text').find_all('a'):
+                            description_links.append(link.get('href'))
+
+                    if result.find(class_='video-result-details'):
+                        created_at = result.find(class_='video-result-details').text
+
+                    
+                    videos.append([counter, id_, title, view_count, duration, channel, channel_url, description, description_links, created_at, scrape_time])
+
+            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_url', 'description', 'description_links', 'created_at', 'scrape_time']
+            videos = pd.DataFrame(videos, columns=videos_columns)
+            return videos
+
+                    
 
         elif type == 'recommended_videos':
             videos = []
@@ -266,6 +332,24 @@ class Crawler():
             
         else:
             print('A correct type needs to be passed.')
+
+    
+    def search(self, query, top=100):
+        '''
+        Queries Bitchute and retrieves top n results according to the relevance ranking.
+
+        Parameters:
+        query (str): Search string
+        top (int): Number of results to be retrieved
+
+        Returns:
+        data: Dataframe of search results.
+        '''
+        url = self.search_base.format(query)
+        src = self.call(url, top=top)
+        data = self.parser(src, type='video_search')
+        return data
+        
 
     def get_recommended_videos(self, type='popular'):
         '''
