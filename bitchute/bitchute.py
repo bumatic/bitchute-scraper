@@ -29,7 +29,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-from dateutil import parser
+import dateutil 
 from datetime import datetime
 
 
@@ -100,7 +100,7 @@ class Crawler():
         
 
     def parser(self, src, type=None, extended=False):
-        scrape_time = str(datetime.fromtimestamp(time.time()))
+        scrape_time = str(time.time())
         if not type:
             raise 'A parse type needs to be passed.'
         elif type == 'recommended_channels':
@@ -250,7 +250,7 @@ class Crawler():
                     else:
                         duration = None
                     if video.find(class_='channel-videos-details'):
-                        created_at = str(parser.parse( video.find(class_='channel-videos-details').text.replace('\n', '')).date())
+                        created_at = str(dateutil.parser.parse( video.find(class_='channel-videos-details').text.replace('\n', '')).date())
                     else:
                         created_at = None
                     if video.find(class_='video-views'):
