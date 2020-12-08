@@ -39,5 +39,5 @@ about, videos = b.(channel_ids, get_channel_about=True, get_channel_videos=True)
 Search Videos (sorted by relevance only).
 
 ```Python
- def search(query, top=100)
+videos = search(query, top=100)
 ```
