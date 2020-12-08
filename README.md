@@ -9,7 +9,7 @@ For using the scraper you can download, clone or fork the repsoitory and put the
 
 ## Usage
 
-Create a crawler object and download it the trending videos and tags:
+Create a crawler object and download it the trending videos and tags.
 
 ```Python
 import bitchute as bc
@@ -24,19 +24,19 @@ rv, tags = b.get_recommended_videos(type='popular')
 rv, tags = b.get_recommended_videos(type='all')
 ```
 
-Recommended channels can be retrieved via:
+Recommended channels can be retrieved via.
 
 ```Python
 rc = b.get_recommended_channels(extended=False)
 ```
 
-Channel information
+Retrieve channel information containing both the channel about as well as the videos published by the channel.
 
 ```Python
 about, videos = b.(channel_ids, get_channel_about=True, get_channel_videos=True)
 ```
 
-Search Videos (sorted by relevance only)
+Search Videos (sorted by relevance only).
 
 ```Python
  def search(query, top=100)
