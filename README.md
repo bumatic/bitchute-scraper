@@ -14,20 +14,20 @@ Create a crawler object and download it the trending videos and tags.
 ```Python
 import bitchute as bc
 b = bc.Crawler()        
-rv, tags = b.get_recommended_videos(type='trending')
+recommended_videos, tags = b.get_recommended_videos(type='trending')
 ```
 
-You can retrieve ```popular``` and ```all``` videos from the homepage as well. These request currently a list of videos as well as a list of tags. The latter is an artefact of the implementation and is empty.
+You can also retrieve videos listed in ```popular``` and ```all``` from the homepage as well. These request currently return a list of videos as well as a list of tags. The latter is an artifact of the current implementation and is to be ignored. (Will be fixed later.)
 
 ```Python
-rv, tags = b.get_recommended_videos(type='popular')
-rv, tags = b.get_recommended_videos(type='all')
+recommended_videos, tags = b.get_recommended_videos(type='popular')
+recommended_videos, tags = b.get_recommended_videos(type='all')
 ```
 
 Recommended channels can be retrieved via.
 
 ```Python
-rc = b.get_recommended_channels(extended=False)
+recommended_channels = b.get_recommended_channels(extended=False)
 ```
 
 Retrieve channel information containing both the channel about as well as the videos published by the channel.
