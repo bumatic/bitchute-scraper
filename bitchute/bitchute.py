@@ -15,11 +15,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-
-#from datetime import timedelta  # datetime, date,
-#from dateutil.relativedelta import relativedelta
-#import csv
-
 import time
 import datetime
 import markdownify
@@ -113,7 +108,7 @@ class Crawler():
         return page_source
         
 
-    def parser(self, src, type=None, extended=False):
+    def parser(self, src, type=None, kind=None, extended=False):
         scrape_time = str(time.time())
         if not type:
             raise 'A parse type needs to be passed.'
@@ -186,13 +181,73 @@ class Crawler():
             videos = pd.DataFrame(videos, columns=videos_columns)
             return videos
 
-                    
-
         elif type == 'recommended_videos':
             videos = []
             tags = []
             soup = BeautifulSoup(src, 'html.parser')
-            if soup.find(class_='video-card'):
+
+            if kind == 'popular':
+                if soup.find(id='listing-popular'):
+                    soup = soup.find(id='listing-popular')
+                else:
+                    return None
+                
+            elif kind == 'trending-day':
+                if soup.find(id='trending-day'):
+                    soup = soup.find(id='trending-day')
+                else:
+                    return None
+
+            elif kind == 'trending-week':
+                if soup.find(id='trending-week'):
+                    soup = soup.find(id='trending-week')
+                else:
+                    return None
+
+            elif kind == 'trending-month':
+                if soup.find(id='trending-month'):
+                    soup = soup.find(id='trending-month')
+                else:
+                    return None
+    
+            elif kind == 'all':
+                if soup.find(id='listing-all'):
+                    soup = soup.find(id='listing-all')
+                else:
+                    return None
+            else:
+                print('kind needs to be passed for recommendations.')
+                return None
+
+            if soup.find(class_='video-result-container'):
+                counter = 0
+                for video in soup.find_all(class_='video-result-container'):
+                    counter += 1
+                    title = None
+                    id_ = None
+                    view_count = None
+                    duration = None
+                    channel = None
+                    channel_url = None
+                    created_at = None
+
+                    if video.find(class_='video-result-title'):
+                        title = video.find(class_='video-result-title').text.strip('\n')
+                        id_ = video.find(class_='video-result-title').find('a').get('href').split('/')[-2]
+                    
+                    if video.find(class_='video-views'):
+                        view_count = video.find(class_='video-views').text.strip('\n')
+                    if video.find(class_='video-duration'):
+                        duration = video.find(class_='video-duration').text.strip('\n')
+                    
+                    if video.find(class_='video-result-channel'):
+                        channel = video.find(class_='video-result-channel').text.strip('\n')
+                        channel_id = video.find(class_='video-result-channel').find('a').get('href').split('/')[-2]
+                    if video.find(class_='video-result-details'):
+                        created_at = video.find(class_='video-result-details').text.strip('\n')
+                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
+
+            elif soup.find(class_='video-card'):
                 counter = 0
                 for video in soup.find_all(class_='video-card'):
                     counter += 1
@@ -214,10 +269,10 @@ class Crawler():
                         duration = video.find(class_='video-duration').text
                     if video.find(class_='video-card-channel'):
                         channel = video.find(class_='video-card-channel').text
-                        channel_url = video.find(class_='video-card-channel').find('a').get('href')
+                        channel_id = video.find(class_='video-card-channel').find('a').get('href').split('/')[-1]
                     if video.find(class_='video-card-published'):
                         created_at = video.find(class_='video-card-published').text
-                    videos.append([counter, id_, title, view_count, duration, channel, channel_url, created_at, scrape_time])
+                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
             
             if soup.find(class_='sidebar tags'):
                 for tag in soup.find(class_='sidebar tags').find_all('li'):
@@ -226,7 +281,7 @@ class Crawler():
                     tags.append([tag_name, tag_url, scrape_time])
 
             
-            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_url', 'created_at', 'scrape_time']
+            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'created_at', 'scrape_time']
             videos = pd.DataFrame(videos, columns=videos_columns)
 
             tags_columns = ['tag_name', 'tag_url', 'scrape_time']
@@ -330,6 +385,84 @@ class Crawler():
             data = pd.DataFrame(data, columns=columns)
             return data
             
+        elif type == 'video':
+            id_ = None
+            title = None
+            description = None
+            description_links = []
+            view_count = None
+            like_count = None
+            dislike_count = None
+            created_at = None
+            hashtags = []
+            category = None
+            sensitivity = None
+            channel_name = None
+            channel_id = None
+            owner_name = None
+            owner_id = None
+            subscribers = None
+            next_id = None
+            related_ids = []
+
+            soup = BeautifulSoup(src, 'html.parser')
+            
+            if soup.find(id='canonical'):
+                id_ = soup.find(id='canonical').get('href').split('/')[-2]
+            if soup.find(id='video-title'):
+                title = soup.find(id='video-title').text.strip('\n')
+            if soup.find(id='video-view-count'):
+                view_count = soup.find(id='video-view-count').text.strip('\n')
+            if soup.find(id='video-like-count'):
+                like_count = soup.find(id='video-like-count').text.strip('\n')
+            if soup.find(id='video-dislike-count'):
+                dislike_count = soup.find(id='video-dislike-count').text.strip('\n')
+            if soup.find(class_='video-publish-date'):
+                created_at = soup.find(class_='video-publish-date').text.strip('\n')
+            if soup.find(id='video-hashtags'):
+                if soup.find(id='video-hashtags').find('li'):
+                    for tag in soup.find(id='video-hashtags').find_all('li'):
+                        hashtags.append(tag.text.strip('\n'))
+            if soup.find(id='video-description'):
+                description = soup.find(id='video-description').decode_contents()
+                description = description.strip('\n')
+                description = markdownify.markdownify(description)
+
+                if soup.find(id='video-description').find('a'):
+                    for link in soup.find(id='video-description').find_all('a'):
+                        description_links.append(link.get('href'))
+            if soup.find(class_='video-detail-list'):
+                if soup.find(class_='video-detail-list').find('tr'):
+                    for row in soup.find(class_='video-detail-list').find_all('tr'):
+                        value = row.find('a').text
+                        if 'Category' in row.text:
+                            category = value
+                        elif 'Sensitivity' in row.text:
+                            sensitivity = value
+            if soup.find(class_='channel-banner'):
+                channel_data = soup.find(class_='channel-banner')
+                if channel_data.find(class_='name'):
+                    channel_name = channel_data.find(class_='name').text
+                    channel_id = channel_data.find(class_='name').find('a').get('href').split('/')[-2]
+                if channel_data.find(class_='owner'):
+                    owner_name = channel_data.find(class_='owner').text
+                    owner_id = channel_data.find(class_='owner').find('a').get('href').split('/')[-2]
+                if channel_data.find(class_='subscribers'):
+                    subscribers = channel_data.find(class_='subscribers').text.replace('subscribers', '').strip()
+
+            if soup.find(class_='sidebar-next'):
+                if soup.find(class_='sidebar-next').find(class_='video-card-title'):
+                    next_id = soup.find(class_='sidebar-next').find(class_='video-card-title').find('a').get('href').split('/')[-2]
+
+            if soup.find(class_='sidebar-recent'):
+                if soup.find(class_='sidebar-recent').find(class_='video-card-title'):
+                    for item in soup.find(class_='sidebar-recent').find_all(class_='video-card-title'):
+                        related_ids.append(item.find('a').get('href').split('/')[-2])
+
+            columns = ['id', 'title', 'description', 'description_links', 'view_count', 'like_count', 'dislike_count', 'created', 'hashtags', 'category', 'sensitivity', 'channel_name', 'channel_id', 'owner_name', 'owner_id', 'subscriber_count', 'next_video', 'releated_videos']
+            data = pd.DataFrame([[id_, title, description, description_links, view_count, like_count, dislike_count, created_at, hashtags, category, sensitivity, channel_name, channel_id, owner_name, owner_id, subscribers, next_id, related_ids]], columns=columns)
+            return data
+
         else:
             print('A correct type needs to be passed.')
 
@@ -348,8 +481,7 @@ class Crawler():
         url = self.search_base.format(query)
         src = self.call(url, top=top)
         data = self.parser(src, type='video_search')
-        return data
-        
+        return data   
 
     def get_recommended_videos(self, type='popular'):
         '''
@@ -363,14 +495,26 @@ class Crawler():
         '''
         if type == 'popular':
             src = self.call(self.bitchute_base)
-            data = self.parser(src, type='recommended_videos')
+            data = self.parser(src, type='recommended_videos', kind='popular')
             return data
         elif type == 'trending':
             src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos')
+            data = self.parser(src, type='recommended_videos', kind='trending-day')
+            return data
+        elif type == 'trending-day':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-day')
+            return data
+        elif type == 'trending-week':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-week')
+            return data
+        elif type == 'trending-month':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-month')
             return data
         elif type == 'all':
-            src = self.call(self.bitchute_base, click_link_text='ALL')
+            src = self.call(self.bitchute_base, click_link_text='ALL', kind='all')
             data = self.parser(src, type='recommended_videos')
             return data
         else:
@@ -448,6 +592,46 @@ class Crawler():
             print('channel_ids must be of type list for multiple or str for single channels')
             return None
     
+    def get_video(self, video_id):
+        '''
+        Scrapes video metadata.
+
+        Parameters:
+        video_id (str): ID of video to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        video_url = self.video_base.format(video_id)
+        src = self.call(video_url)
+        video_data = self.parser(src, type='video')
+        return video_data
+
+    def get_videos(self, video_ids):
+        '''
+        Scapes metadata of multiple videos.
+
+        Parameters:
+        video_ids (list): List of video ids to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        if type(video_ids) == str:
+            return self.get_video(video_ids)
+        elif type(video_ids) == list:
+            video_data = pd.DataFrame()
+            for video_id in video_ids:
+                video_tmp = self.get_video(video_id)                
+                video_data = video_data.append(video_tmp)
+            return video_data
+        else:
+            print('video_ids must be of type list for multiple or str for single video')
+            return None 
+
+
     def get_status(self, reset=True):
         status = self.status
         if reset:
