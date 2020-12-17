@@ -514,8 +514,8 @@ class Crawler():
             data = self.parser(src, type='recommended_videos', kind='trending-month')
             return data
         elif type == 'all':
-            src = self.call(self.bitchute_base, click_link_text='ALL', kind='all')
-            data = self.parser(src, type='recommended_videos')
+            src = self.call(self.bitchute_base, click_link_text='ALL')
+            data = self.parser(src, type='recommended_videos', kind='all')
             return data
         else:
             print('Wrong type. Accepted types are popular, trending and all.')
