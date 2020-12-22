@@ -24,6 +24,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+from dateutil import parser
 import dateutil 
 from datetime import datetime
 
@@ -39,6 +40,7 @@ class Crawler():
         self.bitchute_base = 'https://www.bitchute.com/'
         self.channel_base = 'https://www.bitchute.com/channel/{}/'
         self.video_base = 'https://www.bitchute.com/video/{}/'
+        self.hashtag_base = 'https://www.bitchute.com/hashtag/{}/'
         self.profile_base = 'https://www.bitchute.com/profile/{}/'
         self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
         
@@ -106,7 +108,10 @@ class Crawler():
         wd.close()
 
         return page_source
-        
+    
+    def process_views(self, views):
+        views = views.replace('K', '00').replace('k', '00').replace('.', '')
+        return views 
 
     def parser(self, src, type=None, kind=None, extended=False):
         scrape_time = str(time.time())
@@ -132,7 +137,7 @@ class Crawler():
             return channels
 
         
-        elif type == 'video_search':
+        elif type == 'video_search' or type == 'hashtag_videos':
             videos = []
             soup = BeautifulSoup(src, 'html.parser')
             if soup.find(class_='results-list'):
@@ -150,18 +155,18 @@ class Crawler():
                     created_at = None
 
                     if result.find(class_='video-result-title'):
-                        title = result.find(class_='video-result-title').text
+                        title = result.find(class_='video-result-title').text.strip('\n').strip()
                         id_ = result.find(class_='video-result-title').find('a').get('href').split('/')[-2]
 
                     if result.find(class_='video-views'):
-                        view_count = result.find(class_='video-views').text.strip()
+                        view_count = self.process_views(result.find(class_='video-views').text.strip('\n').strip())
 
                     if result.find(class_='video-duration'):
-                        duration = result.find(class_='video-duration').text.strip()
+                        duration = result.find(class_='video-duration').text.strip('\n').strip()
 
                     if result.find(class_='video-result-channel'):
-                        channel = result.find(class_='video-result-channel').text
-                        channel_url = result.find(class_='video-result-channel').find('a').get('href')
+                        channel = result.find(class_='video-result-channel').text.strip('\n').strip()
+                        channel_id = result.find(class_='video-result-channel').find('a').get('href').split('/')[-2]
 
                     if result.find(class_='video-result-text'):
                         description = result.find(class_='video-result-text').decode_contents()
@@ -172,12 +177,12 @@ class Crawler():
                             description_links.append(link.get('href'))
 
                     if result.find(class_='video-result-details'):
-                        created_at = result.find(class_='video-result-details').text
+                        created_at = result.find(class_='video-result-details').text.strip('\n').strip()
 
                     
-                    videos.append([counter, id_, title, view_count, duration, channel, channel_url, description, description_links, created_at, scrape_time])
+                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, description, description_links, created_at, scrape_time])
 
-            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_url', 'description', 'description_links', 'created_at', 'scrape_time']
+            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'description', 'description_links', 'created_at', 'scrape_time']
             videos = pd.DataFrame(videos, columns=videos_columns)
             return videos
 
@@ -236,7 +241,7 @@ class Crawler():
                         id_ = video.find(class_='video-result-title').find('a').get('href').split('/')[-2]
                     
                     if video.find(class_='video-views'):
-                        view_count = video.find(class_='video-views').text.strip('\n')
+                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n'))
                     if video.find(class_='video-duration'):
                         duration = video.find(class_='video-duration').text.strip('\n')
                     
@@ -260,23 +265,23 @@ class Crawler():
                     created_at = None
 
                     if video.find(class_='video-card-title'):
-                        title = video.find(class_='video-card-title').text
+                        title = video.find(class_='video-card-title').text.strip('\n').strip()
                     if video.find(class_='video-card-id'):
-                        id_ = video.find(class_='video-card-id').text
+                        id_ = video.find(class_='video-card-id').text.strip('\n').strip()
                     if video.find(class_='video-views'):
-                        view_count = video.find(class_='video-views').text
+                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n').strip())
                     if video.find(class_='video-duration'):
-                        duration = video.find(class_='video-duration').text
+                        duration = video.find(class_='video-duration').text.strip('\n').strip()
                     if video.find(class_='video-card-channel'):
-                        channel = video.find(class_='video-card-channel').text
+                        channel = video.find(class_='video-card-channel').text.strip('\n').strip()
                         channel_id = video.find(class_='video-card-channel').find('a').get('href').split('/')[-1]
                     if video.find(class_='video-card-published'):
-                        created_at = video.find(class_='video-card-published').text
+                        created_at = video.find(class_='video-card-published').text.strip('\n').strip()
                     videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
             
             if soup.find(class_='sidebar tags'):
                 for tag in soup.find(class_='sidebar tags').find_all('li'):
-                    tag_name = tag.text 
+                    tag_name = tag.text.strip('\n').strip()
                     tag_url = tag.find('a').get('href')
                     tags.append([tag_name, tag_url, scrape_time])
 
@@ -307,9 +312,9 @@ class Crawler():
             if soup.find('link', id='canonical'):
                 id_ = soup.find('link', id='canonical').get('href').split('/')[-2]
             if soup.find(class_='name'):
-                title = soup.find(class_='name').text
+                title = soup.find(class_='name').text.strip('\n').strip()
             if soup.find(class_='owner'):
-                owner = soup.find(class_='owner').text
+                owner = soup.find(class_='owner').text.strip('\n').strip()
                 owner_link = soup.find(class_='owner').find('a').get('href')
             if soup.find(id='channel-description'):
                 description = soup.find(id='channel-description').decode_contents()
@@ -323,15 +328,15 @@ class Crawler():
             if soup.find(class_='channel-about-details'):
                 for elem in soup.find(class_='channel-about-details').find_all('p'):
                     if 'Category' in elem.text and elem.find('a'):
-                        category = elem.find('a').text
+                        category = elem.find('a').text.strip('\n').strip()
                     elif elem.find(class_='fa-video'):
                         video_count = elem.text.split(' ')[1]
                     elif elem.find(class_='fa-users'):
                         subscriber_count = elem.text.split(' ')[1]
                     elif elem.find(class_='fa-eye'):
-                        view_count = elem.text.split(' ')[1]
+                        view_count = self.process_views(elem.text.split(' ')[1])
                     else:
-                        created_at = elem.text
+                        created_at = elem.text.strip('\n').strip()
                         pass
             data = [id_, title, social_links, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
             columns = ['id', 'title', 'social_links', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
@@ -347,17 +352,17 @@ class Crawler():
             else:
                 channel_id = None
             if soup.find(class_='name'):
-                channel_title = soup.find(class_='name').text
+                channel_title = soup.find(class_='name').text.strip('\n')
             else:
                 channel_title = None
             if soup.find(class_='channel-videos-list'):
                 for video in soup.find(class_='channel-videos-list').find_all(class_='channel-videos-container'):
                     if video.find(class_='channel-videos-title'):
-                        title = video.find(class_='channel-videos-title').text
-                        link = video.find(class_='channel-videos-title').find('a').get('href')
+                        title = video.find(class_='channel-videos-title').text.strip('\n')
+                        video_id = video.find(class_='channel-videos-title').find('a').get('href').split('/')[-2]
                     else:
                         title = None
-                        link = None
+                        video_id = None
                     if video.find(class_='channel-videos-text'):
                         description = video.find(class_='channel-videos-text').decode_contents()
                         description = description.strip('\n')
@@ -367,7 +372,7 @@ class Crawler():
                         description = None
                         description_links = []
                     if video.find(class_='video-duration'):
-                        duration = video.find(class_='video-duration').text
+                        duration = video.find(class_='video-duration').text.strip('\n').strip()
                     else:
                         duration = None
                     if video.find(class_='channel-videos-details'):
@@ -375,13 +380,13 @@ class Crawler():
                     else:
                         created_at = None
                     if video.find(class_='video-views'):
-                        view_count = video.find(class_='video-views').text.strip()
+                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n').strip())
                     else:
                         view_count = None
 
-                    data.append([channel_id, channel_title, title, link, created_at, duration, view_count, description, description_links, scrape_time])
+                    data.append([channel_id, channel_title, video_id, title, created_at, duration, view_count, description, description_links, scrape_time])
             
-            columns = ['channel_id', 'channel_title', 'title', 'link', 'created', 'duration', 'view_count', 'description', 'description_links']
+            columns = ['channel_id', 'channel_title', 'video_id', 'title', 'created', 'duration', 'view_count', 'description', 'description_links', 'scrape_time']
             data = pd.DataFrame(data, columns=columns)
             return data
             
@@ -410,15 +415,17 @@ class Crawler():
             if soup.find(id='canonical'):
                 id_ = soup.find(id='canonical').get('href').split('/')[-2]
             if soup.find(id='video-title'):
-                title = soup.find(id='video-title').text.strip('\n')
+                title = soup.find(id='video-title').text.strip('\n').strip()
             if soup.find(id='video-view-count'):
-                view_count = soup.find(id='video-view-count').text.strip('\n')
+                view_count = self.process_views(soup.find(id='video-view-count').text.strip('\n').strip())
             if soup.find(id='video-like-count'):
-                like_count = soup.find(id='video-like-count').text.strip('\n')
+                like_count = soup.find(id='video-like-count').text.strip('\n').strip()
             if soup.find(id='video-dislike-count'):
-                dislike_count = soup.find(id='video-dislike-count').text.strip('\n')
+                dislike_count = soup.find(id='video-dislike-count').text.strip('\n').strip()
             if soup.find(class_='video-publish-date'):
-                created_at = soup.find(class_='video-publish-date').text.strip('\n')
+                created_at = soup.find(class_='video-publish-date').text.strip('\n').strip().replace('First published at ', '')
+                created_at = parser.parse(created_at)
+
             if soup.find(id='video-hashtags'):
                 if soup.find(id='video-hashtags').find('li'):
                     for tag in soup.find(id='video-hashtags').find_all('li'):
@@ -442,10 +449,10 @@ class Crawler():
             if soup.find(class_='channel-banner'):
                 channel_data = soup.find(class_='channel-banner')
                 if channel_data.find(class_='name'):
-                    channel_name = channel_data.find(class_='name').text
+                    channel_name = channel_data.find(class_='name').text.strip('\n').strip()
                     channel_id = channel_data.find(class_='name').find('a').get('href').split('/')[-2]
                 if channel_data.find(class_='owner'):
-                    owner_name = channel_data.find(class_='owner').text
+                    owner_name = channel_data.find(class_='owner').text.strip('\n').strip()
                     owner_id = channel_data.find(class_='owner').find('a').get('href').split('/')[-2]
                 if channel_data.find(class_='subscribers'):
                     subscribers = channel_data.find(class_='subscribers').text.replace('subscribers', '').strip()
@@ -631,6 +638,47 @@ class Crawler():
             print('video_ids must be of type list for multiple or str for single video')
             return None 
 
+    def get_hashtag(self, hashtag):
+        '''
+        Scapes video posted with a tag.
+
+        Parameters:
+        tag (str): Hashtag to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+        hashtag_url = self.hashtag_base.format(hashtag)
+        src = self.call(hashtag_url)
+        video_data = self.parser(src, type='hashtag_videos')
+        video_data['hashtag'] = hashtag
+        return video_data
+
+    def get_hashtags(self, hashtags):
+        '''
+        Scapes video posted with a tag.
+
+        Parameters:
+        tag (str): Hashtag to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        if type(hashtags) == str:
+            video_data = self.get_hashtag(hashtags)
+            video_data['hashtag'] = hashtags              
+            return video_data
+        elif type(hashtags) == list:
+            video_data = pd.DataFrame()
+            for hashtag in hashtags:
+                video_tmp = self.get_hashtag(hashtag)
+                video_tmp['hashtag'] = hashtag             
+                video_data = video_data.append(video_tmp)
+            return video_data
+        else:
+            print('hashtags must be of type list for multiple or str for single hashtag')
+            return None 
 
     def get_status(self, reset=True):
         status = self.status
@@ -640,48 +688,4 @@ class Crawler():
     
     def set_status(self, message):
         self.status.append(message)
-    
-    
-'''
-class Entity():
-    def __init__(self):
-        self.id = None
-        self.name = None
-        self.created = None
-        self.crawl_date = None
-
-    def calculate_date_created(self, crawl_date, created_at):
-        pass
-
-    def set_data(self, id_=None, name=None, created=None, crawl_date=None):
-        if id_:
-            self.id = id_
-        if name:
-            self.name = name
-        if created:
-            self.created = created
-        if crawl_date:
-            self.crawl_date = crawl_date
-
-
-class Video(Entity):
-    def __init__(self):
-        pass
-
-
-class Channel(Entity):
-    def __init__(self):
-        pass
-
-
-class Recommendations(Entity):
-    def __init__(self):
-        pass
-
-
-class (Entity):
-    def __init__(self):
-        pass
-
-'''
 
