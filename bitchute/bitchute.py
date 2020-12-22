@@ -31,11 +31,12 @@ from datetime import datetime
 
 class Crawler():
     def __init__(self, headless=True):
-        
         self.options = Options()
         if headless:
             self.options.add_argument('--headless')
+        
         self.options.add_argument('--disable-dev-shm-usage')
+        self.wd = None
         self.status = []
         self.bitchute_base = 'https://www.bitchute.com/'
         self.channel_base = 'https://www.bitchute.com/channel/{}/'
@@ -44,34 +45,41 @@ class Crawler():
         self.profile_base = 'https://www.bitchute.com/profile/{}/'
         self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
         
+
+    def create_webdriver(self):
+        self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
     
+    def reset_webdriver(self):
+        self.wd.close()
+        self.wd = None
+
     def call(self, url, click_link_text=None, scroll=True, top=None):
-        wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
+        if not self.wd:
+            self.create_webdriver()
+
         print('Retrieving: ' + url + ' ', end='')
         self.set_status('Retrieving: ' + url)
-
-        wd.get(url)
+        self.wd.get(url)
         time.sleep(2)
-        #return wd
 
-        if len(wd.find_elements_by_xpath('//button[normalize-space()="Dismiss"]')) > 0:
+        if len(self.wd.find_elements_by_xpath('//button[normalize-space()="Dismiss"]')) > 0:
             time.sleep(2)
-            wd.find_element_by_xpath('//button[normalize-space()="Dismiss"]').click()
+            self.wd.find_element_by_xpath('//button[normalize-space()="Dismiss"]').click()
             
-        if click_link_text and not len(wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
+        if click_link_text and not len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
             time.sleep(5)
         
         if click_link_text:
-            if len(wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
+            if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
                 time.sleep(2)
-                wd.find_element_by_partial_link_text(click_link_text).click()
+                self.wd.find_element_by_partial_link_text(click_link_text).click()
                 time.sleep(2)
             else:
                 print('Cannot find link to click')
 
         sensitivity = 'Some videos are not shown'
-        if len(wd.find_elements(By.PARTIAL_LINK_TEXT, sensitivity))>0:
-            wd.find_element_by_partial_link_text(sensitivity).click()
+        if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, sensitivity))>0:
+            self.wd.find_element_by_partial_link_text(sensitivity).click()
             time.sleep(2)
 
         if scroll:
@@ -91,7 +99,7 @@ class Crawler():
                 'return lenOfPage;'
             )
 
-            lenOfPage = wd.execute_script(script)
+            lenOfPage = self.wd.execute_script(script)
             match = False
             while not match and iteration < iterations:
                 iteration += increment
@@ -99,43 +107,240 @@ class Crawler():
                 self.set_status('.')
                 lastCount = lenOfPage
                 time.sleep(4)
-                lenOfPage = wd.execute_script(script)
+                lenOfPage = self.wd.execute_script(script)
                 if lastCount == lenOfPage:
                     match = True
         print('')
 
-        page_source = wd.page_source
-        wd.close()
-
+        page_source = self.wd.page_source
         return page_source
     
     def process_views(self, views):
         views = views.replace('K', '00').replace('k', '00').replace('.', '')
         return views 
 
+    def search(self, query, top=100):
+        '''
+        Queries Bitchute and retrieves top n results according to the relevance ranking.
+
+        Parameters:
+        query (str): Search string
+        top (int): Number of results to be retrieved
+
+        Returns:
+        data: Dataframe of search results.
+        '''
+        url = self.search_base.format(query)
+        src = self.call(url, top=top)
+        data = self.parser(src, type='video_search')
+        self.reset_webdriver()
+        return data   
+
+    def get_recommended_videos(self, type='popular'):
+        '''
+        Scapes recommended videos on bitchute homepage.
+
+        Parameters:
+        type (str): POPULAR, TRENDING, ALL
+
+        Returns:
+        data: Dataframe of recommended videos.
+        '''
+        if type == 'popular':
+            src = self.call(self.bitchute_base)
+            data = self.parser(src, type='recommended_videos', kind='popular')
+            return data
+        elif type == 'trending':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-day')
+            return data
+        elif type == 'trending-day':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-day')
+            return data
+        elif type == 'trending-week':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-week')
+            return data
+        elif type == 'trending-month':
+            src = self.call(self.bitchute_base, click_link_text='TRENDING')
+            data = self.parser(src, type='recommended_videos', kind='trending-month')
+            return data
+        elif type == 'all':
+            src = self.call(self.bitchute_base, click_link_text='ALL')
+            data = self.parser(src, type='recommended_videos', kind='all')
+            return data
+        else:
+            print('Wrong type. Accepted types are popular, trending and all.')
+            return None
+        self.reset_webdriver()
+
+    def get_recommended_channels(self, extended=True):
+        '''
+        Scapes recommended channels on bitchute homepage.
+
+        Parameters:
+        extended (bool): whether to retrieve extended channel information. Default: True
+
+        Returns:
+        data: Dataframe of recommended channels.
+        '''
+        src = self.call(self.bitchute_base, scroll=False)
+        data = self.parser(src, type='recommended_channels', extended=extended)
+        self.reset_webdriver()
+        return data
+
+    def _get_channel(self, channel_id, get_channel_about=True, get_channel_videos=True):
+        '''
+        Scapes channel information.
+
+        Parameters:
+        channel_id (str): ID of channel to be scraped.
+        get_channel_about (bool): Get the about information by a channel. Default:True 
+        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
+
+        Returns:
+        about_data: Dataframe of channel about.
+        videos_data: Dataframe of channel videos.
+        '''
+
+        if get_channel_about:
+            channel_about_url = self.channel_base.format(channel_id)
+            src = self.call(channel_about_url, click_link_text='ABOUT', scroll=False)
+            about_data = self.parser(src, type='channel_about')
+        else:
+            about_data = pd.DataFrame()
+
+        if get_channel_videos:
+            channel_videos_url = self.channel_base.format(channel_id)
+            src = self.call(channel_videos_url, click_link_text='VIDEOS')
+            videos_data = self.parser(src, type='channel_videos')
+        else:
+            videos_data = pd.DataFrame()
+
+        return about_data, videos_data
+
+    def get_channels(self, channel_ids, get_channel_about=True, get_channel_videos=True):
+        '''
+        Scapes information for multiple channels.
+
+        Parameters:
+        channel_ids (list): List of channel ids to be scraped.
+        get_channel_about (bool): Get the about information by a channel. Default:True 
+        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
+
+        Returns:
+        abouts: Dataframe of channel abouts.
+        videos: Dataframe of channel videos.
+        '''
+        if type(channel_ids) == str:
+            abouts, videos = self._get_channel(channel_ids, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
+            self.reset_webdriver()
+            return abouts, videos
+        elif type(channel_ids) == list:
+            abouts = pd.DataFrame()
+            videos = pd.DataFrame()
+            for channel_id in channel_ids:
+                about_tmp, videos_tmp = self._get_channel(channel_id, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
+                abouts = abouts.append(about_tmp)
+                videos = videos.append(videos_tmp)
+            self.reset_webdriver()
+            return abouts, videos
+        else:
+            print('channel_ids must be of type list for multiple or str for single channels')
+            return None
+
+    
+    def _get_video(self, video_id):
+        '''
+        Scrapes video metadata.
+
+        Parameters:
+        video_id (str): ID of video to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        video_url = self.video_base.format(video_id)
+        src = self.call(video_url)
+        video_data = self.parser(src, type='video')
+        return video_data
+
+    def get_videos(self, video_ids):
+        '''
+        Scapes metadata of multiple videos.
+
+        Parameters:
+        video_ids (list): List of video ids to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        if type(video_ids) == str:
+            video_data = self._get_video(video_ids)
+            self.reset_webdriver()
+            return video_data
+        elif type(video_ids) == list:
+            video_data = pd.DataFrame()
+            for video_id in video_ids:
+                video_tmp = self._get_video(video_id)                
+                video_data = video_data.append(video_tmp)
+            self.reset_webdriver()
+            return video_data
+        else:
+            print('video_ids must be of type list for multiple or str for single video')
+            return None 
+
+    def _get_hashtag(self, hashtag):
+        '''
+        Scapes video posted with a tag.
+
+        Parameters:
+        tag (str): Hashtag to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+        hashtag_url = self.hashtag_base.format(hashtag)
+        src = self.call(hashtag_url)
+        video_data = self.parser(src, type='hashtag_videos')
+        video_data['hashtag'] = hashtag
+        return video_data
+
+    def get_hashtags(self, hashtags):
+        '''
+        Scapes video posted with a tag.
+
+        Parameters:
+        tag (str): Hashtag to be scraped.
+        
+        Returns:
+        video_data: Dataframe of video metadata.
+        '''
+
+        if type(hashtags) == str:
+            video_data = self._get_hashtag(hashtags)
+            video_data['hashtag'] = hashtags
+            self.reset_webdriver()   
+            return video_data
+        elif type(hashtags) == list:
+            video_data = pd.DataFrame()
+            for hashtag in hashtags:
+                video_tmp = self._get_hashtag(hashtag)
+                video_tmp['hashtag'] = hashtag             
+                video_data = video_data.append(video_tmp)
+            self.reset_webdriver()
+            return video_data
+        else:
+            print('hashtags must be of type list for multiple or str for single hashtag')
+            return None 
+
     def parser(self, src, type=None, kind=None, extended=False):
         scrape_time = str(time.time())
         if not type:
             raise 'A parse type needs to be passed.'
-        elif type == 'recommended_channels':
-            channels = []
-            channel_ids = []
-            soup = BeautifulSoup(src, 'html.parser')
-            if soup.find(id='carousel'):
-                for item in soup.find(id='carousel').find_all(class_='channel-card'):
-                    id_ = item.find('a').get('href').split('/')[-2]
-                    name = item.find(class_='channel-card-title').text
-                    channels.append([id_, name, scrape_time])
-                    channel_ids.append(id_)
-            if extended:
-                channel_ids = list(set(channel_ids))
-                channels, videos = self.get_channels(channel_ids, get_channel_videos=False)
-            else:
-                columns = ['id', 'name', 'scrape_time']
-                channels = pd.DataFrame(channels, columns=columns)
-                channels = channels.drop_duplicates(subset=['id'])
-            return channels
-
         
         elif type == 'video_search' or type == 'hashtag_videos':
             videos = []
@@ -186,6 +391,26 @@ class Crawler():
             videos = pd.DataFrame(videos, columns=videos_columns)
             return videos
 
+        elif type == 'recommended_channels':
+            channels = []
+            channel_ids = []
+            soup = BeautifulSoup(src, 'html.parser')
+            if soup.find(id='carousel'):
+                for item in soup.find(id='carousel').find_all(class_='channel-card'):
+                    id_ = item.find('a').get('href').split('/')[-2]
+                    name = item.find(class_='channel-card-title').text
+                    channels.append([id_, name, scrape_time])
+                    channel_ids.append(id_)
+            if extended:
+                channel_ids = list(set(channel_ids))
+                channels, videos = self.get_channels(channel_ids, get_channel_videos=False)
+            else:
+                columns = ['id', 'name', 'scrape_time']
+                channels = pd.DataFrame(channels, columns=columns)
+                channels = channels.drop_duplicates(subset=['id'])
+            return channels
+
+        
         elif type == 'recommended_videos':
             videos = []
             tags = []
@@ -274,7 +499,7 @@ class Crawler():
                         duration = video.find(class_='video-duration').text.strip('\n').strip()
                     if video.find(class_='video-card-channel'):
                         channel = video.find(class_='video-card-channel').text.strip('\n').strip()
-                        channel_id = video.find(class_='video-card-channel').find('a').get('href').split('/')[-1]
+                        channel_id = video.find(class_='video-card-channel').find('a').get('href').split('/')[-2]
                     if video.find(class_='video-card-published'):
                         created_at = video.find(class_='video-card-published').text.strip('\n').strip()
                     videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
@@ -542,7 +767,7 @@ class Crawler():
         data = self.parser(src, type='recommended_channels', extended=extended)
         return data
 
-    def get_channel(self, channel_id, get_channel_about=True, get_channel_videos=True):
+    def _get_channel(self, channel_id, get_channel_about=True, get_channel_videos=True):
         '''
         Scapes channel information.
 
@@ -586,7 +811,9 @@ class Crawler():
         videos: Dataframe of channel videos.
         '''
         if type(channel_ids) == str:
-            return self.get_channel(channel_ids, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
+            abouts, videos = self._get_channel(channel_ids, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
+            
+            return abouts, videos
         elif type(channel_ids) == list:
             abouts = pd.DataFrame()
             videos = pd.DataFrame()
