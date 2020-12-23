@@ -16,7 +16,6 @@
 
 
 import time
-import datetime
 import markdownify
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -26,7 +25,6 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from dateutil import parser
 from tqdm import tqdm
-import dateutil 
 from datetime import datetime
 from retrying import retry
 
@@ -46,7 +44,6 @@ class Crawler():
         self.hashtag_base = 'https://www.bitchute.com/hashtag/{}/'
         self.profile_base = 'https://www.bitchute.com/profile/{}/'
         self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
-        
 
     def create_webdriver(self):
         self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
@@ -350,7 +347,7 @@ class Crawler():
             return None 
 
     def parser(self, src, type=None, kind=None, extended=False):
-        scrape_time = str(time.time())
+        scrape_time = str(int(datetime.utcnow().timestamp()))
         if not type:
             raise 'A parse type needs to be passed.'
         
@@ -399,7 +396,7 @@ class Crawler():
                     
                     videos.append([counter, id_, title, view_count, duration, channel, channel_id, description, description_links, created_at, scrape_time])
 
-            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'description', 'description_links', 'created_at', 'scrape_time']
+            videos_columns = ['rank', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'description', 'description_links', 'created_at', 'scrape_time']
             videos = pd.DataFrame(videos, columns=videos_columns)
             return videos
 
@@ -407,17 +404,19 @@ class Crawler():
             channels = []
             channel_ids = []
             soup = BeautifulSoup(src, 'html.parser')
+            counter = 0
             if soup.find(id='carousel'):
                 for item in soup.find(id='carousel').find_all(class_='channel-card'):
+                    counter += 1
                     id_ = item.find('a').get('href').split('/')[-2]
                     name = item.find(class_='channel-card-title').text
-                    channels.append([id_, name, scrape_time])
+                    channels.append([counter, id_, name, scrape_time])
                     channel_ids.append(id_)
             if extended:
                 channel_ids = list(set(channel_ids))
                 channels, videos = self.get_channels(channel_ids, get_channel_videos=False)
             else:
-                columns = ['id', 'name', 'scrape_time']
+                columns = ['rank', 'id', 'name', 'scrape_time']
                 channels = pd.DataFrame(channels, columns=columns)
                 channels = channels.drop_duplicates(subset=['id'])
             return channels
@@ -517,16 +516,18 @@ class Crawler():
                     videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
             
             if soup.find(class_='sidebar tags'):
+                counter = 0
                 for tag in soup.find(class_='sidebar tags').find_all('li'):
+                    counter += 1
                     tag_name = tag.text.strip('\n').strip()
                     tag_url = tag.find('a').get('href')
-                    tags.append([tag_name, tag_url, scrape_time])
+                    tags.append([counter, tag_name, tag_url, scrape_time])
 
             
-            videos_columns = ['counter', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'created_at', 'scrape_time']
+            videos_columns = ['rank', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'created_at', 'scrape_time']
             videos = pd.DataFrame(videos, columns=videos_columns)
 
-            tags_columns = ['tag_name', 'tag_url', 'scrape_time']
+            tags_columns = ['rank', 'tag_name', 'tag_url', 'scrape_time']
             tags = pd.DataFrame(tags, columns=tags_columns)
 
             return videos, tags

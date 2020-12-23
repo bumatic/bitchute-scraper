@@ -5,9 +5,7 @@ import bitchute as bc
 from datetime import datetime
 
 def get_time():
-    #dt = datetime.fromtimestamp(time.time())
-    #t = str(dt.year)+'-'+str(dt.month)+'-'+str(dt.day)+' '+str(dt.hour)+'h'+str(dt.minute)+'m'+str(dt.second)+'s'
-    t = str(time.time())
+    t = str(int(datetime.utcnow().timestamp()))
     return t
 
 def check_dir(path):
