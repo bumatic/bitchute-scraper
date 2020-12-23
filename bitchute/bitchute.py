@@ -27,6 +27,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from dateutil import parser
 import dateutil 
 from datetime import datetime
+from retrying import retry
 
 
 class Crawler():
@@ -53,6 +54,7 @@ class Crawler():
         self.wd.close()
         self.wd = None
 
+    @retry(stop_max_attempt_number=5, wait_random_min=1000, wait_random_max=2000)
     def call(self, url, click_link_text=None, scroll=True, top=None):
         if not self.wd:
             self.create_webdriver()
@@ -279,14 +281,21 @@ class Crawler():
         '''
 
         if type(video_ids) == str:
-            video_data = self._get_video(video_ids)
-            self.reset_webdriver()
-            return video_data
+            try:
+                video_data = self._get_video(video_ids)
+                self.reset_webdriver()
+                return video_data
+            except:
+                print('Failed for video with id {}'.format(video_ids))
         elif type(video_ids) == list:
             video_data = pd.DataFrame()
             for video_id in video_ids:
-                video_tmp = self._get_video(video_id)                
-                video_data = video_data.append(video_tmp)
+                try:
+                    video_tmp = self._get_video(video_id)                
+                    video_data = video_data.append(video_tmp)
+                except:
+                    print('Failed for video with id {}'.format(video_id))
+                    self.reset_webdriver()
             self.reset_webdriver()
             return video_data
         else:
