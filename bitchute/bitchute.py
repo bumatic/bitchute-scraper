@@ -31,14 +31,14 @@ from retrying import retry
 
 
 class Crawler():
-    def __init__(self, headless=True):
+    def __init__(self, headless=True, verbose=False):
         self.options = Options()
         if headless:
             self.options.add_argument('--headless')
-        
         self.options.add_argument('--disable-dev-shm-usage')
         self.wd = None
         self.status = []
+        self.verbose = verbose
         self.bitchute_base = 'https://www.bitchute.com/'
         self.channel_base = 'https://www.bitchute.com/channel/{}/'
         self.video_base = 'https://www.bitchute.com/video/{}/'
@@ -58,8 +58,8 @@ class Crawler():
     def call(self, url, click_link_text=None, scroll=True, top=None):
         if not self.wd:
             self.create_webdriver()
-
-        print('Retrieving: ' + url + ' ', end='')
+        if self.verbose:
+            print('Retrieving: ' + url + ' ', end='')
         self.set_status('Retrieving: ' + url)
         self.wd.get(url)
         time.sleep(2)
@@ -105,14 +105,16 @@ class Crawler():
             match = False
             while not match and iteration < iterations:
                 iteration += increment
-                print('.', end='')
+                if self.verbose:
+                    print('.', end='')
                 self.set_status('.')
                 lastCount = lenOfPage
                 time.sleep(4)
                 lenOfPage = self.wd.execute_script(script)
                 if lastCount == lenOfPage:
                     match = True
-        print('')
+        if self.verbose:
+            print('')
 
         page_source = self.wd.page_source
         return page_source
@@ -242,7 +244,7 @@ class Crawler():
         elif type(channel_ids) == list:
             abouts = pd.DataFrame()
             videos = pd.DataFrame()
-            for channel_id in channel_ids:
+            for channel_id in (tqdm(channel_ids) if not self.verbose else channel_ids):
                 about_tmp, videos_tmp = self._get_channel(channel_id, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
                 abouts = abouts.append(about_tmp)
                 videos = videos.append(videos_tmp)
@@ -289,7 +291,7 @@ class Crawler():
                 print('Failed for video with id {}'.format(video_ids))
         elif type(video_ids) == list:
             video_data = pd.DataFrame()
-            for video_id in video_ids:
+            for video_id in (tqdm(video_ids) if not self.verbose else video_ids):
                 try:
                     video_tmp = self._get_video(video_id)                
                     video_data = video_data.append(video_tmp)
@@ -336,7 +338,7 @@ class Crawler():
             return video_data
         elif type(hashtags) == list:
             video_data = pd.DataFrame()
-            for hashtag in hashtags:
+            for hashtag in (tqdm(hashtags) if not self.verbose else hashtags):
                 video_tmp = self._get_hashtag(hashtag)
                 video_tmp['hashtag'] = hashtag             
                 video_data = video_data.append(video_tmp)
@@ -706,215 +708,6 @@ class Crawler():
 
         else:
             print('A correct type needs to be passed.')
-
-    
-    def search(self, query, top=100):
-        '''
-        Queries Bitchute and retrieves top n results according to the relevance ranking.
-
-        Parameters:
-        query (str): Search string
-        top (int): Number of results to be retrieved
-
-        Returns:
-        data: Dataframe of search results.
-        '''
-        url = self.search_base.format(query)
-        src = self.call(url, top=top)
-        data = self.parser(src, type='video_search')
-        return data   
-
-    def get_recommended_videos(self, type='popular'):
-        '''
-        Scapes recommended videos on bitchute homepage.
-
-        Parameters:
-        type (str): POPULAR, TRENDING, ALL
-
-        Returns:
-        data: Dataframe of recommended videos.
-        '''
-        if type == 'popular':
-            src = self.call(self.bitchute_base)
-            data = self.parser(src, type='recommended_videos', kind='popular')
-            return data
-        elif type == 'trending':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-day')
-            return data
-        elif type == 'trending-day':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-day')
-            return data
-        elif type == 'trending-week':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-week')
-            return data
-        elif type == 'trending-month':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-month')
-            return data
-        elif type == 'all':
-            src = self.call(self.bitchute_base, click_link_text='ALL')
-            data = self.parser(src, type='recommended_videos', kind='all')
-            return data
-        else:
-            print('Wrong type. Accepted types are popular, trending and all.')
-            return None
-
-    def get_recommended_channels(self, extended=True):
-        '''
-        Scapes recommended channels on bitchute homepage.
-
-        Parameters:
-        extended (bool): whether to retrieve extended channel information. Default: True
-
-        Returns:
-        data: Dataframe of recommended channels.
-        '''
-        src = self.call(self.bitchute_base, scroll=False)
-        data = self.parser(src, type='recommended_channels', extended=extended)
-        return data
-
-    def _get_channel(self, channel_id, get_channel_about=True, get_channel_videos=True):
-        '''
-        Scapes channel information.
-
-        Parameters:
-        channel_id (str): ID of channel to be scraped.
-        get_channel_about (bool): Get the about information by a channel. Default:True 
-        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
-
-        Returns:
-        about_data: Dataframe of channel about.
-        videos_data: Dataframe of channel videos.
-        '''
-
-        if get_channel_about:
-            channel_about_url = self.channel_base.format(channel_id)
-            src = self.call(channel_about_url, click_link_text='ABOUT', scroll=False)
-            about_data = self.parser(src, type='channel_about')
-        else:
-            about_data = pd.DataFrame()
-
-        if get_channel_videos:
-            channel_videos_url = self.channel_base.format(channel_id)
-            src = self.call(channel_videos_url, click_link_text='VIDEOS')
-            videos_data = self.parser(src, type='channel_videos')
-        else:
-            videos_data = pd.DataFrame()
-
-        return about_data, videos_data
-
-    def get_channels(self, channel_ids, get_channel_about=True, get_channel_videos=True):
-        '''
-        Scapes information for multiple channels.
-
-        Parameters:
-        channel_ids (list): List of channel ids to be scraped.
-        get_channel_about (bool): Get the about information by a channel. Default:True 
-        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
-
-        Returns:
-        abouts: Dataframe of channel abouts.
-        videos: Dataframe of channel videos.
-        '''
-        if type(channel_ids) == str:
-            abouts, videos = self._get_channel(channel_ids, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
-            
-            return abouts, videos
-        elif type(channel_ids) == list:
-            abouts = pd.DataFrame()
-            videos = pd.DataFrame()
-            for channel_id in channel_ids:
-                about_tmp, videos_tmp = self.get_channel(channel_id, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
-                abouts = abouts.append(about_tmp)
-                videos = videos.append(videos_tmp)
-            return abouts, videos
-        else:
-            print('channel_ids must be of type list for multiple or str for single channels')
-            return None
-    
-    def get_video(self, video_id):
-        '''
-        Scrapes video metadata.
-
-        Parameters:
-        video_id (str): ID of video to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        video_url = self.video_base.format(video_id)
-        src = self.call(video_url)
-        video_data = self.parser(src, type='video')
-        return video_data
-
-    def get_videos(self, video_ids):
-        '''
-        Scapes metadata of multiple videos.
-
-        Parameters:
-        video_ids (list): List of video ids to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        if type(video_ids) == str:
-            return self.get_video(video_ids)
-        elif type(video_ids) == list:
-            video_data = pd.DataFrame()
-            for video_id in video_ids:
-                video_tmp = self.get_video(video_id)                
-                video_data = video_data.append(video_tmp)
-            return video_data
-        else:
-            print('video_ids must be of type list for multiple or str for single video')
-            return None 
-
-    def get_hashtag(self, hashtag):
-        '''
-        Scapes video posted with a tag.
-
-        Parameters:
-        tag (str): Hashtag to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-        hashtag_url = self.hashtag_base.format(hashtag)
-        src = self.call(hashtag_url)
-        video_data = self.parser(src, type='hashtag_videos')
-        video_data['hashtag'] = hashtag
-        return video_data
-
-    def get_hashtags(self, hashtags):
-        '''
-        Scapes video posted with a tag.
-
-        Parameters:
-        tag (str): Hashtag to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        if type(hashtags) == str:
-            video_data = self.get_hashtag(hashtags)
-            video_data['hashtag'] = hashtags              
-            return video_data
-        elif type(hashtags) == list:
-            video_data = pd.DataFrame()
-            for hashtag in hashtags:
-                video_tmp = self.get_hashtag(hashtag)
-                video_tmp['hashtag'] = hashtag             
-                video_data = video_data.append(video_tmp)
-            return video_data
-        else:
-            print('hashtags must be of type list for multiple or str for single hashtag')
-            return None 
 
     def get_status(self, reset=True):
         status = self.status
