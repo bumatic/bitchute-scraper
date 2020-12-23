@@ -25,6 +25,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from dateutil import parser
+from tqdm import tqdm
 import dateutil 
 from datetime import datetime
 from retrying import retry
