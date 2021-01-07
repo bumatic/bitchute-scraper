@@ -49,7 +49,8 @@ class Crawler():
         self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
     
     def reset_webdriver(self):
-        self.wd.close()
+        #self.wd.close()
+        self.wd.quit()
         self.wd = None
 
     @retry(stop_max_attempt_number=5, wait_random_min=1000, wait_random_max=2000)
