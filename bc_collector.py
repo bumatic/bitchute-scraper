@@ -57,3 +57,5 @@ check_dir(recommended_channels_path)
 rc = b.get_recommended_channels(extended=False)
 t = get_time()
 rc.to_csv(os.path.join(recommended_channels_path, t+'.csv'), sep='\t', index=None)
+
+b.reset_webdriver()
