@@ -60,7 +60,13 @@ class Crawler():
         if self.verbose:
             print('Retrieving: ' + url + ' ', end='')
         self.set_status('Retrieving: ' + url)
-        self.wd.get(url)
+        
+        if self.wd.current_url == url:
+            self.wd.get('about:blank')
+            self.wd.get(url)
+        else:
+            self.wd.get(url)
+        
         time.sleep(2)
 
         if len(self.wd.find_elements_by_xpath('//button[normalize-space()="Dismiss"]')) > 0:
