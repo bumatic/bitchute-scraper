@@ -522,14 +522,16 @@ class Crawler():
                         created_at = video.find(class_='video-card-published').text.strip('\n').strip()
                     videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
             
+            
+            soup = BeautifulSoup(src, 'html.parser')
             if soup.find(class_='sidebar tags'):
+                print('hier')
                 counter = 0
                 for tag in soup.find(class_='sidebar tags').find_all('li'):
                     counter += 1
                     tag_name = tag.text.strip('\n').strip()
                     tag_url = tag.find('a').get('href')
                     tags.append([counter, tag_name, tag_url, scrape_time])
-
             
             videos_columns = ['rank', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'created_at', 'scrape_time']
             videos = pd.DataFrame(videos, columns=videos_columns)
