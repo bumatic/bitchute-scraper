@@ -525,7 +525,6 @@ class Crawler():
             
             soup = BeautifulSoup(src, 'html.parser')
             if soup.find(class_='sidebar tags'):
-                print('hier')
                 counter = 0
                 for tag in soup.find(class_='sidebar tags').find_all('li'):
                     counter += 1
