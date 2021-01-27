@@ -1,0 +1,8 @@
+beautifulsoup4
+markdownify
+pandas
+python-dateutil
+retrying
+selenium
+tqdm
+webdriver-manager
