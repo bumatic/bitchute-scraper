@@ -35,6 +35,7 @@ class Crawler():
         if headless:
             self.options.add_argument('--headless')
         self.options.add_argument('--disable-dev-shm-usage')
+        self.options.add_argument('--no-sandbox')
         self.chrome_driver = chrome_driver
         self.wd = None
         self.status = []
