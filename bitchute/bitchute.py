@@ -30,11 +30,12 @@ from retrying import retry
 
 
 class Crawler():
-    def __init__(self, headless=True, verbose=False):
+    def __init__(self, headless=True, verbose=False, chrome_driver=None):
         self.options = Options()
         if headless:
             self.options.add_argument('--headless')
         self.options.add_argument('--disable-dev-shm-usage')
+        self.chrome_driver = chrome_driver
         self.wd = None
         self.status = []
         self.verbose = verbose
@@ -46,7 +47,10 @@ class Crawler():
         self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
 
     def create_webdriver(self):
-        self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
+        if not self.chrome_driver:
+            self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
+        else:
+            self.wd = webdriver.Chrome(self.chrome_driver, options=self.options)
     
     def reset_webdriver(self):
         #self.wd.close()
