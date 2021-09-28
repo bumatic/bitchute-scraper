@@ -1,4 +1,4 @@
-# Simple Python Bitchute Scraper
+# Python Bitchute Scraper
 
 This repository contains a simple scaper for the bitcute video plattform and is WIP.
 
