@@ -1,6 +1,6 @@
 # Bitchute Scraper
 
-This repository contains a Python scraper for the Bitchute video platform. It allows you to query for videos or to retrieve platform recommendations such as trending videos, popular videos and trending tags. It makes use of Selenium for retrieving data.
+Python scraper for the Bitchute video platform. It allows you to query for videos and to retrieve platform recommendations such as trending videos, popular videos or trending tags. It makes use of Selenium for retrieving data.
 
 ## Installation
 
