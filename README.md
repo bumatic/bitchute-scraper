@@ -1,6 +1,6 @@
 # Python Bitchute Scraper
 
-This repository contains a simple scaper for the bitcute video plattform and is WIP.
+This repository contains a simple scaper for the bitcute video plattform. It makes uses of Selenium for retrieving data.
 
 
 ## Installation
