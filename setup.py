@@ -4,17 +4,18 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="bitchute", # Replace with your own username
+    name="bitchute-scraper", 
     version="0.0.1",
     author="Marcus Burkhardt",
     author_email="marcus.burkhardt@gmail.com",
-    description="A package to scrape bitchute.",
+    description="A package to scrape bitchute platform recommendations using Selenium.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/bumatic/bitchute-scraper",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
