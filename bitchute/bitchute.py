@@ -628,7 +628,7 @@ class Crawler():
                     else:
                         duration = None
                     if video.find(class_='channel-videos-details'):
-                        created_at = str(dateutil.parser.parse( video.find(class_='channel-videos-details').text.replace('\n', '')).date())
+                        created_at = str(parser.parse( video.find(class_='channel-videos-details').text.replace('\n', '')).date())
                     else:
                         created_at = None
                     if video.find(class_='video-views'):
