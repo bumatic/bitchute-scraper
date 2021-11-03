@@ -45,7 +45,7 @@ recommended_channels = b.get_recommended_channels(extended=False)
 Retrieve channel information containing both the channel about as well as the videos published by the channel.
 
 ```Python
-about, videos = b.(channel_ids, get_channel_about=True, get_channel_videos=True)
+about, videos = b.get_channels(channel_ids, get_channel_about=True, get_channel_videos=True)
 ```
 
 Search Videos (sorted by relevance only).
