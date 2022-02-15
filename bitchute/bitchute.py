@@ -131,7 +131,16 @@ class Crawler():
         return page_source
     
     def process_views(self, views):
-        views = views.replace('K', '00').replace('k', '00').replace('.', '')
+        if "k" in views or "K" in views:
+            views = views.replace('K', '').replace('k', '')
+            if '.' not in views:
+                views = views[:-1]+'.'+views[-1:]
+            views = float(views) * 1000
+        elif "m" in views or "M" in views:
+            views = views.replace('M', '').replace('m', '')
+            if '.' not in views:
+                views = views[:-1]+'.'+views[-1:]
+            views = float(views) * 1000000
         return views 
 
     def search(self, query, top=100):
