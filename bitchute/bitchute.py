@@ -141,7 +141,7 @@ class Crawler():
             if '.' not in views:
                 views = views[:-1]+'.'+views[-1:]
             views = float(views) * 1000000
-        return views 
+        return int(views)
 
     def search(self, query, top=100):
         '''
