@@ -5,10 +5,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="bitchute-scraper", 
-    version="0.1.3",
+    version="0.1.4",
     author="Marcus Burkhardt",
     author_email="marcus.burkhardt@gmail.com",
-    description="A package to scrape bitchute platform recommendations using Selenium.",
+    description="A package to scrape BitChute platform recommendations using Selenium.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/bumatic/bitchute-scraper",

@@ -1,5 +1,5 @@
 # Simple Python module for retrieving data from bitchute.
-# Copyright (C) 2020 Marcus Burkhardt
+# Copyright (C) 2022 Marcus Burkhardt
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -287,7 +287,7 @@ class Crawler():
         '''
 
         video_url = self.video_base.format(video_id)
-        src = self.call(video_url)
+        src = self.call(video_url, scroll=False)
         video_data = self.parser(src, type='video')
         return video_data
 
@@ -314,7 +314,8 @@ class Crawler():
             for video_id in (tqdm(video_ids) if not self.verbose else video_ids):
                 try:
                     video_tmp = self._get_video(video_id)                
-                    video_data = video_data.append(video_tmp)
+                    if video_tmp is not None:
+                        video_data = video_data.append(video_tmp)
                 except:
                     print('Failed for video with id {}'.format(video_id))
                     self.reset_webdriver()
@@ -370,6 +371,11 @@ class Crawler():
 
     def parser(self, src, type=None, kind=None, extended=False):
         scrape_time = str(int(datetime.utcnow().timestamp()))
+        
+        soup = BeautifulSoup(src, 'html.parser')
+        if soup.find('h1') and ("404 - Page not found" in soup.find('h1').text or "404 - PAGE NOT FOUND" in soup.find('h1').text):
+            return None
+
         if not type:
             raise 'A parse type needs to be passed.'
         
