@@ -361,8 +361,9 @@ class Crawler():
             video_data = pd.DataFrame()
             for hashtag in (tqdm(hashtags) if not self.verbose else hashtags):
                 video_tmp = self._get_hashtag(hashtag)
-                video_tmp['hashtag'] = hashtag             
-                video_data = video_data.append(video_tmp)
+                if video_tmp is not None:
+                    video_tmp['hashtag'] = hashtag             
+                    video_data = video_data.append(video_tmp)
             self.reset_webdriver()
             return video_data
         else:
