@@ -563,6 +563,7 @@ class Crawler():
             return videos, tags
 
         elif type == 'channel_about':
+            uid = None
             id_ = None
             title = None
             owner = None
@@ -578,9 +579,11 @@ class Crawler():
 
             soup = BeautifulSoup(src, 'html.parser')            
             if soup.find('link', id='canonical'):
-                id_ = soup.find('link', id='canonical').get('href').split('/')[-2]
+                uid = soup.find('link', id='canonical').get('href').split('/')[-2]
             if soup.find(class_='name'):
                 title = soup.find(class_='name').text.strip('\n').strip()
+                if soup.find(class_='name').find('a'):
+                    id_ = soup.find(class_='name').find('a').get('href').strip('/').split('/')[1]
             if soup.find(class_='owner'):
                 owner = soup.find(class_='owner').text.strip('\n').strip()
                 owner_link = soup.find(class_='owner').find('a').get('href')
@@ -606,8 +609,8 @@ class Crawler():
                     else:
                         created_at = elem.text.strip('\n').strip()
                         pass
-            data = [id_, title, social_links, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
-            columns = ['id', 'title', 'social_links', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
+            data = [uid, id_, title, social_links, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
+            columns = ['uid', 'id', 'title', 'social_links', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
             data = pd.DataFrame([data], columns=columns)
             return data
 
