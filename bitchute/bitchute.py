@@ -138,9 +138,11 @@ class Crawler():
             views = float(views) * 1000
         elif "m" in views or "M" in views:
             views = views.replace('M', '').replace('m', '')
-            if '.' not in views:
-                views = views[:-1]+'.'+views[-1:]
-            views = float(views) * 1000000
+            if '.' in views:
+                views = float(views)
+            else:
+                views = float(views)/10
+            views = views * 1000000
         return int(views)
 
     def search(self, query, top=100):
@@ -609,8 +611,8 @@ class Crawler():
                     else:
                         created_at = elem.text.strip('\n').strip()
                         pass
-            data = [uid, id_, title, social_links, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
-            columns = ['uid', 'id', 'title', 'social_links', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
+            data = [uid, id_, title, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
+            columns = ['uid', 'id', 'title', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
             data = pd.DataFrame([data], columns=columns)
             return data
 
