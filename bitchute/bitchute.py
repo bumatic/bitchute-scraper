@@ -157,11 +157,13 @@ class Crawler():
         data: Dataframe of search results.
         '''
         url = self.search_base.format(query)
+        if isinstance(top, str) and top.lower()=='all':
+            top = None
         src = self.call(url, top=top)
         data = self.parser(src, type='video_search')
         self.reset_webdriver()
         return data   
-
+    
     def get_recommended_videos(self, type='popular'):
         '''
         Scapes recommended videos on bitchute homepage.
@@ -200,6 +202,24 @@ class Crawler():
             print('Wrong type. Accepted types are popular, trending and all.')
             return None
         self.reset_webdriver()
+
+    def get_popular_videos(self):
+        videos, tags = self.get_recommended_videos(type='popular')
+        return videos
+    
+    def get_trending_videos(self):
+        videos, tags = self.get_recommended_videos(type='trending')
+        return videos
+    def get_trending_tags(self):
+        videos, tags = self.get_recommended_videos(type='trending')
+        return tags
+    def get_trending(self):
+        videos, tags = self.get_recommended_videos(type='trending')
+        return videos, tags
+    
+    def get_all_videos(self):
+        videos, tags = self.get_recommended_videos(type='all')
+        return videos
 
     def get_recommended_channels(self, extended=True):
         '''
@@ -268,8 +288,8 @@ class Crawler():
             videos = pd.DataFrame()
             for channel_id in (tqdm(channel_ids) if not self.verbose else channel_ids):
                 about_tmp, videos_tmp = self._get_channel(channel_id, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
-                abouts = abouts.append(about_tmp)
-                videos = videos.append(videos_tmp)
+                abouts = pd.concat([abouts, about_tmp])
+                videos = pd.concat([videos, videos_tmp])
             self.reset_webdriver()
             return abouts, videos
         else:
@@ -317,7 +337,7 @@ class Crawler():
                 try:
                     video_tmp = self._get_video(video_id)                
                     if video_tmp is not None:
-                        video_data = video_data.append(video_tmp)
+                        video_data = pd.concat([video_data, video_tmp])
                 except:
                     print('Failed for video with id {}'.format(video_id))
                     self.reset_webdriver()
@@ -365,7 +385,7 @@ class Crawler():
                 video_tmp = self._get_hashtag(hashtag)
                 if video_tmp is not None:
                     video_tmp['hashtag'] = hashtag             
-                    video_data = video_data.append(video_tmp)
+                    video_data = video_data.pd.concat([video_tmp])
             self.reset_webdriver()
             return video_data
         else:
