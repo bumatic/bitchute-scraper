@@ -19,5 +19,6 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
-    install_requires = ['beautifulsoup4', 'markdownify', 'pandas', 'python-dateutil', 'retrying', 'selenium', 'tqdm', 'webdriver-manager'],
+    install_requires = ['beautifulsoup4', 'markdownify', 'pandas', 'python-dateutil', 'retrying', 'selenium==4.2.0', 'tqdm', 
+'webdriver-manager'],
 )

@@ -3,6 +3,6 @@ markdownify
 pandas
 python-dateutil
 retrying
-selenium
+selenium==4.2.0
 tqdm
 webdriver-manager
