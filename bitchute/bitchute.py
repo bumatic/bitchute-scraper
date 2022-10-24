@@ -75,9 +75,10 @@ class Crawler():
         
         time.sleep(2)
 
-        if len(self.wd.find_elements_by_xpath('//button[normalize-space()="Dismiss"]')) > 0:
+        # I dislike `find_elements(By.XPATH,...)`, especially relative XPATHs - prefer `By.CSS_SELECTOR` for these cases but this looks like a good enough fix to get things working again
+        if len(self.wd.find_elements(By.XPATH, '//button[normalize-space()="Dismiss"]')) > 0:
             time.sleep(2)
-            self.wd.find_element_by_xpath('//button[normalize-space()="Dismiss"]').click()
+            self.wd.find_element(By.XPATH, '//button[normalize-space()="Dismiss"]').click()
             
         if click_link_text and not len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
             time.sleep(5)
@@ -85,14 +86,14 @@ class Crawler():
         if click_link_text:
             if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
                 time.sleep(2)
-                self.wd.find_element_by_partial_link_text(click_link_text).click()
+                self.wd.find_element(By.PARTIAL_LINK_TEXT, click_link_text).click()
                 time.sleep(2)
             else:
                 print('Cannot find link to click')
 
         sensitivity = 'Some videos are not shown'
         if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, sensitivity))>0:
-            self.wd.find_element_by_partial_link_text(sensitivity).click()
+            self.wd.find_element(By.PARTIAL_LINK_TEXT, sensitivity).click()
             time.sleep(2)
 
         if scroll:
