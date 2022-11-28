@@ -75,7 +75,6 @@ class Crawler():
         
         time.sleep(2)
 
-        # I dislike `find_elements(By.XPATH,...)`, especially relative XPATHs - prefer `By.CSS_SELECTOR` for these cases but this looks like a good enough fix to get things working again
         if len(self.wd.find_elements(By.XPATH, '//button[normalize-space()="Dismiss"]')) > 0:
             time.sleep(2)
             self.wd.find_element(By.XPATH, '//button[normalize-space()="Dismiss"]').click()
