@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="bitchute-scraper", 
-    version="0.1.7",
+    version="0.1.8",
     author="Marcus Burkhardt",
     author_email="marcus.burkhardt@gmail.com",
     description="A package to scrape BitChute platform recommendations using Selenium.",
