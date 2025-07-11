@@ -31,6 +31,7 @@ In addition to the python package the scraper makes use of the selenium chromedr
 ``` bash
 brew install --cask google-chrome
 ```
+
 On Linux and Windows installing Google Chrome should be straight forward as well. In case you don't know how to do this, just query it with the search engine of your trust!
 
 
