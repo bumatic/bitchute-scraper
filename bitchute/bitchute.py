@@ -1,5 +1,6 @@
 # Simple Python module for retrieving data from bitchute.
-# Copyright (C) 2022 Marcus Burkhardt
+# Created and maintained since 2022 by Marcus Burkhardt. Recent code changes 
+# with GenAI support by Claude.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,764 +15,1066 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 import time
+import logging
+import json
+from typing import Dict, List, Optional, Union, Tuple, Any
+from dataclasses import dataclass, asdict
+from abc import ABC, abstractmethod
+from urllib.parse import urljoin, urlparse
+import requests
+from pathlib import Path
+import asyncio
+import aiohttp
+import hashlib
+
 import markdownify
 import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
-from dateutil import parser
+from dateutil import parser as date_parser
 from tqdm import tqdm
 from datetime import datetime
 from retrying import retry
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class Crawler():
-    def __init__(self, headless=True, verbose=False, chrome_driver=None):
+
+@dataclass
+class VideoData:
+    """Data structure for video information"""
+    id: str = ""
+    title: str = ""
+    description: str = ""
+    view_count: int = 0
+    like_count: int = 0
+    dislike_count: int = 0
+    duration: str = ""
+    channel_name: str = ""
+    channel_id: str = ""
+    created_at: str = ""
+    thumbnail_url: str = ""
+    hashtags: List[str] = None
+    category: str = ""
+    sensitivity: str = ""
+    description_links: List[str] = None
+    scrape_time: str = ""
+
+    def __post_init__(self):
+        if self.hashtags is None:
+            self.hashtags = []
+        if self.description_links is None:
+            self.description_links = []
+        if not self.scrape_time:
+            self.scrape_time = str(int(datetime.utcnow().timestamp()))
+
+
+@dataclass 
+class ChannelData:
+    """Data structure for channel information"""
+    id: str = ""
+    title: str = ""
+    description: str = ""
+    video_count: int = 0
+    subscriber_count: str = ""
+    view_count: int = 0
+    created_at: str = ""
+    category: str = ""
+    social_links: List[Tuple[str, str]] = None
+    owner_name: str = ""
+    owner_id: str = ""
+    thumbnail_url: str = ""
+    scrape_time: str = ""
+
+    def __post_init__(self):
+        if self.social_links is None:
+            self.social_links = []
+        if not self.scrape_time:
+            self.scrape_time = str(int(datetime.utcnow().timestamp()))
+
+
+class SelectorConfig:
+    """Configurable CSS selectors for Bitchute elements"""
+    
+    def __init__(self, config_file: Optional[str] = None):
+        # Default selectors based on original documentation
+        self.selectors = {
+            'video_cards': ['.video-card', '.video-result-container'],
+            'video_title': ['.video-card-title a', '.video-result-title a'],
+            'video_channel': ['.video-card-channel a', '.video-result-channel a'],
+            'video_views': ['.video-views'],
+            'video_duration': ['.video-duration'],
+            'video_thumbnail': ['.video-card-image img', '.video-result-image img'],
+            'channel_cards': ['.channel-card'],
+            'channel_title': ['.channel-card-title', '.name a'],
+            'trending_tags': ['.sidebar.tags li a'],
+            'video_description': ['#video-description', '.video-result-text'],
+            'channel_description': ['#channel-description'],
+            'pagination_next': ['.next', '[aria-label="Next"]'],
+            'dismiss_button': ['button:contains("Dismiss")', '.dismiss'],
+            'sensitivity_link': ['a:contains("Some videos are not shown")']
+        }
+        
+        if config_file and Path(config_file).exists():
+            self._load_config(config_file)
+    
+    def _load_config(self, config_file: str):
+        """Load selector configuration from JSON file"""
+        try:
+            with open(config_file, 'r') as f:
+                custom_selectors = json.load(f)
+                self.selectors.update(custom_selectors)
+        except Exception as e:
+            logger.warning(f"Failed to load selector config: {e}")
+    
+    def get_selectors(self, element_type: str) -> List[str]:
+        """Get list of selectors for an element type"""
+        return self.selectors.get(element_type, [])
+    
+    def save_config(self, config_file: str):
+        """Save current selector configuration to JSON file"""
+        with open(config_file, 'w') as f:
+            json.dump(self.selectors, f, indent=2)
+
+
+class BasePage(ABC):
+    """Abstract base class for page parsers"""
+    
+    def __init__(self, soup: BeautifulSoup, selectors: SelectorConfig):
+        self.soup = soup
+        self.selectors = selectors
+    
+    @abstractmethod
+    def parse(self) -> Any:
+        """Parse the page and return structured data"""
+        pass
+    
+    def find_element_safe(self, element_type: str, parent=None) -> Optional[Any]:
+        """Safely find an element using multiple selector fallbacks"""
+        search_scope = parent or self.soup
+        selectors = self.selectors.get_selectors(element_type)
+        
+        for selector in selectors:
+            try:
+                element = search_scope.select_one(selector)
+                if element:
+                    return element
+            except Exception as e:
+                logger.debug(f"Selector '{selector}' failed: {e}")
+                continue
+        return None
+    
+    def find_elements_safe(self, element_type: str, parent=None) -> List[Any]:
+        """Safely find elements using multiple selector fallbacks"""
+        search_scope = parent or self.soup
+        selectors = self.selectors.get_selectors(element_type)
+        
+        for selector in selectors:
+            try:
+                elements = search_scope.select(selector)
+                if elements:
+                    return elements
+            except Exception as e:
+                logger.debug(f"Selector '{selector}' failed: {e}")
+                continue
+        return []
+
+
+class VideoPageParser(BasePage):
+    """Parser for individual video pages"""
+    
+    def parse(self) -> Optional[VideoData]:
+        try:
+            video = VideoData()
+            
+            # Extract video ID from canonical link
+            canonical = self.soup.find('link', id='canonical')
+            if canonical:
+                video.id = canonical.get('href', '').split('/')[-2]
+            
+            # Extract basic video information
+            title_elem = self.find_element_safe('video_title')
+            if title_elem:
+                video.title = title_elem.get_text().strip()
+            
+            # Extract view count
+            views_elem = self.soup.find(id='video-view-count')
+            if views_elem:
+                video.view_count = self._process_views(views_elem.get_text().strip())
+            
+            # Extract like/dislike counts
+            like_elem = self.soup.find(id='video-like-count')
+            if like_elem:
+                video.like_count = int(like_elem.get_text().strip() or 0)
+            
+            dislike_elem = self.soup.find(id='video-dislike-count')
+            if dislike_elem:
+                video.dislike_count = int(dislike_elem.get_text().strip() or 0)
+            
+            # Extract description
+            desc_elem = self.find_element_safe('video_description')
+            if desc_elem:
+                video.description = markdownify.markdownify(desc_elem.decode_contents())
+                video.description_links = [a.get('href') for a in desc_elem.find_all('a') if a.get('href')]
+            
+            # Extract hashtags
+            hashtag_elem = self.soup.find(id='video-hashtags')
+            if hashtag_elem:
+                video.hashtags = [tag.get_text().strip() for tag in hashtag_elem.find_all('li')]
+            
+            # Extract thumbnail URL
+            video_elem = self.soup.find('video', id='player')
+            if video_elem and video_elem.get('poster'):
+                video.thumbnail_url = video_elem.get('poster')
+            
+            # Extract channel information
+            channel_banner = self.soup.find(class_='channel-banner')
+            if channel_banner:
+                channel_name_elem = channel_banner.find(class_='name')
+                if channel_name_elem and channel_name_elem.find('a'):
+                    video.channel_name = channel_name_elem.get_text().strip()
+                    video.channel_id = channel_name_elem.find('a').get('href', '').split('/')[-2]
+            
+            return video
+            
+        except Exception as e:
+            logger.error(f"Failed to parse video page: {e}")
+            return None
+    
+    def _process_views(self, views_str: str) -> int:
+        """Convert view count string to integer"""
+        try:
+            views = views_str.lower().replace(',', '').replace(' ', '')
+            if 'k' in views:
+                views = views.replace('k', '')
+                return int(float(views) * 1000)
+            elif 'm' in views:
+                views = views.replace('m', '')
+                return int(float(views) * 1000000)
+            else:
+                return int(views)
+        except (ValueError, AttributeError):
+            return 0
+
+
+class SearchPageParser(BasePage):
+    """Parser for search results pages"""
+    
+    def parse(self) -> List[VideoData]:
+        videos = []
+        video_containers = self.find_elements_safe('video_cards')
+        
+        for i, container in enumerate(video_containers, 1):
+            try:
+                video = VideoData()
+                video.rank = i
+                
+                # Extract title and ID
+                title_elem = self.find_element_safe('video_title', container)
+                if title_elem:
+                    video.title = title_elem.get_text().strip()
+                    href = title_elem.get('href', '')
+                    if href:
+                        video.id = href.split('/')[-2]
+                
+                # Extract channel
+                channel_elem = self.find_element_safe('video_channel', container)
+                if channel_elem:
+                    video.channel_name = channel_elem.get_text().strip()
+                    video.channel_id = channel_elem.get('href', '').split('/')[-2]
+                
+                # Extract views
+                views_elem = self.find_element_safe('video_views', container)
+                if views_elem:
+                    video.view_count = self._process_views(views_elem.get_text())
+                
+                # Extract duration
+                duration_elem = self.find_element_safe('video_duration', container)
+                if duration_elem:
+                    video.duration = duration_elem.get_text().strip()
+                
+                # Extract thumbnail
+                thumb_elem = self.find_element_safe('video_thumbnail', container)
+                if thumb_elem:
+                    video.thumbnail_url = thumb_elem.get('data-src') or thumb_elem.get('src', '')
+                
+                videos.append(video)
+                
+            except Exception as e:
+                logger.warning(f"Failed to parse video container {i}: {e}")
+                continue
+        
+        return videos
+    
+    def _process_views(self, views_str: str) -> int:
+        """Convert view count string to integer"""
+        try:
+            # Remove common prefixes and clean the string
+            views = views_str.lower().replace('views', '').replace(',', '').strip()
+            if 'k' in views:
+                return int(float(views.replace('k', '')) * 1000)
+            elif 'm' in views:
+                return int(float(views.replace('m', '')) * 1000000)
+            else:
+                return int(views)
+        except (ValueError, AttributeError):
+            return 0
+
+
+class EnhancedCrawler:
+    """Enhanced Bitchute crawler with improved error handling and features"""
+    
+    def __init__(self, headless: bool = True, verbose: bool = False, 
+                 chrome_driver: Optional[str] = None, config_file: Optional[str] = None,
+                 download_thumbnails: bool = False, thumbnail_dir: str = "thumbnails"):
+        
         self.options = Options()
         if headless:
-            self.options.add_argument('--headless')
+            self.options.add_argument('--headless=new')
+        
+        # Enhanced Chrome options for better compatibility
         self.options.add_argument('--disable-dev-shm-usage')
         self.options.add_argument('--no-sandbox')
+        self.options.add_argument('--disable-extensions')
+        self.options.add_argument('--disable-gpu')
+        self.options.add_argument('--window-size=1920,1080')
+        self.options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
         self.chrome_driver = chrome_driver
         self.wd = None
-        self.status = []
         self.verbose = verbose
-        self.bitchute_base = 'https://www.bitchute.com/'
-        self.channel_base = 'https://www.bitchute.com/channel/{}/'
-        self.video_base = 'https://www.bitchute.com/video/{}/'
-        self.hashtag_base = 'https://www.bitchute.com/hashtag/{}/'
-        self.profile_base = 'https://www.bitchute.com/profile/{}/'
-        self.search_base = 'https://www.bitchute.com/search/?query={}&kind=video'
-
+        self.download_thumbnails = download_thumbnails
+        self.thumbnail_dir = Path(thumbnail_dir)
+        
+        # Create thumbnail directory
+        if self.download_thumbnails:
+            self.thumbnail_dir.mkdir(exist_ok=True)
+        
+        # Initialize selectors and URL patterns
+        self.selectors = SelectorConfig(config_file)
+        self._init_url_patterns()
+        
+        # Rate limiting
+        self.last_request_time = 0
+        self.min_delay = 1.0  # Minimum 1 second between requests
+    
+    def _init_url_patterns(self):
+        """Initialize URL patterns for different page types"""
+        self.base_url = 'https://www.bitchute.com/'
+        self.url_patterns = {
+            'channel': 'https://www.bitchute.com/channel/{}/',
+            'video': 'https://www.bitchute.com/video/{}/',
+            'hashtag': 'https://www.bitchute.com/hashtag/{}/',
+            'search': 'https://www.bitchute.com/search/?query={}&kind=video'
+        }
+    
     def create_webdriver(self):
-        if not self.chrome_driver:
-            self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
-        else:
-            self.wd = webdriver.Chrome(self.chrome_driver, options=self.options)
+        """Create WebDriver with enhanced options"""
+        try:
+            if not self.chrome_driver:
+                self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
+            else:
+                self.wd = webdriver.Chrome(self.chrome_driver, options=self.options)
+            
+            # Set implicit wait and page load timeout
+            self.wd.implicitly_wait(10)
+            self.wd.set_page_load_timeout(30)
+            
+            logger.info("WebDriver created successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to create WebDriver: {e}")
+            raise
     
     def reset_webdriver(self):
-        #self.wd.close()
+        """Safely close and reset WebDriver"""
         if self.wd:
-            self.wd.quit()
-        self.wd = None
-
-    @retry(stop_max_attempt_number=5, wait_random_min=1000, wait_random_max=2000)
-    def call(self, url, click_link_text=None, scroll=True, top=None):
+            try:
+                self.wd.quit()
+            except Exception as e:
+                logger.warning(f"Error closing WebDriver: {e}")
+            finally:
+                self.wd = None
+    
+    def _respect_rate_limit(self):
+        """Implement rate limiting to be respectful to the server"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        
+        if time_since_last < self.min_delay:
+            sleep_time = self.min_delay - time_since_last
+            if self.verbose:
+                logger.info(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
+            time.sleep(sleep_time)
+        
+        self.last_request_time = time.time()
+    
+    @retry(stop_max_attempt_number=3, wait_fixed=2000)
+    def _fetch_page(self, url: str, click_elements: Optional[List[str]] = None, 
+                   scroll: bool = True, max_items: Optional[int] = None) -> str:
+        """Fetch page with enhanced error handling and retry logic"""
+        
         if not self.wd:
             self.create_webdriver()
-        if self.verbose:
-            print('Retrieving: ' + url + ' ', end='')
-        self.set_status('Retrieving: ' + url)
         
-        if self.wd.current_url == url:
-            self.wd.get('about:blank')
-            self.wd.get(url)
-        else:
-            self.wd.get(url)
+        self._respect_rate_limit()
         
-        time.sleep(2)
-
-        if len(self.wd.find_elements(By.XPATH, '//button[normalize-space()="Dismiss"]')) > 0:
-            time.sleep(2)
-            self.wd.find_element(By.XPATH, '//button[normalize-space()="Dismiss"]').click()
+        try:
+            if self.verbose:
+                logger.info(f'Fetching: {url}')
             
-        if click_link_text and not len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
-            time.sleep(5)
-        
-        if click_link_text:
-            if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, click_link_text))>0:
-                time.sleep(2)
-                self.wd.find_element(By.PARTIAL_LINK_TEXT, click_link_text).click()
-                time.sleep(2)
-            else:
-                print('Cannot find link to click')
-
-        sensitivity = 'Some videos are not shown'
-        if len(self.wd.find_elements(By.PARTIAL_LINK_TEXT, sensitivity))>0:
-            self.wd.find_element(By.PARTIAL_LINK_TEXT, sensitivity).click()
-            time.sleep(2)
-
-        if scroll:
-            if top:
-                iterations = (top//10) + (top % 10 > 0)
-                iteration = 1
-                increment = 1
-
-            else:
-                iterations = 1
-                iteration = 0
-                increment = 0
-
-            script = (
-                'window.scrollTo(0, document.body.scrollHeight);'
-                'var lenOfPage=document.body.scrollHeight;'
-                'return lenOfPage;'
+            self.wd.get(url)
+            
+            # Wait for page to load
+            WebDriverWait(self.wd, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
-
-            lenOfPage = self.wd.execute_script(script)
-            match = False
-            while not match and iteration < iterations:
-                iteration += increment
-                if self.verbose:
-                    print('.', end='')
-                self.set_status('.')
-                lastCount = lenOfPage
-                time.sleep(4)
-                lenOfPage = self.wd.execute_script(script)
-                if lastCount == lenOfPage:
-                    match = True
-        if self.verbose:
-            print('')
-
-        page_source = self.wd.page_source
-        return page_source
+            
+            # Handle common popups and overlays
+            self._handle_popups()
+            
+            # Click specified elements if provided
+            if click_elements:
+                for element_text in click_elements:
+                    self._click_element_safe(element_text)
+            
+            # Handle scrolling for infinite scroll pages
+            if scroll:
+                self._smart_scroll(max_items)
+            
+            return self.wd.page_source
+            
+        except TimeoutException:
+            logger.error(f"Timeout loading page: {url}")
+            raise
+        except WebDriverException as e:
+            logger.error(f"WebDriver error fetching {url}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error fetching {url}: {e}")
+            raise
     
-    def process_views(self, views):
-        if "k" in views or "K" in views:
-            views = views.replace('K', '').replace('k', '')
-            if '.' not in views:
-                views = views[:-1]+'.'+views[-1:]
-            views = float(views) * 1000
-        elif "m" in views or "M" in views:
-            views = views.replace('M', '').replace('m', '')
-            if '.' in views:
-                views = float(views)
-            else:
-                views = float(views)/10
-            views = views * 1000000
-        return int(views)
-
-    def search(self, query, top=100):
-        '''
-        Queries Bitchute and retrieves top n results according to the relevance ranking.
-
-        Parameters:
-        query (str): Search string
-        top (int): Number of results to be retrieved
-
-        Returns:
-        data: Dataframe of search results.
-        '''
-        url = self.search_base.format(query)
-        if isinstance(top, str) and top.lower()=='all':
-            top = None
-        src = self.call(url, top=top)
-        data = self.parser(src, type='video_search')
-        self.reset_webdriver()
-        return data   
+    def _handle_popups(self):
+        """Handle common popups and dismissible elements"""
+        # Handle dismiss button
+        try:
+            dismiss_selectors = self.selectors.get_selectors('dismiss_button')
+            for selector in dismiss_selectors:
+                elements = self.wd.find_elements(By.CSS_SELECTOR, selector)
+                for element in elements:
+                    if element.is_displayed():
+                        element.click()
+                        time.sleep(1)
+                        break
+        except Exception as e:
+            logger.debug(f"No dismiss button found or error clicking: {e}")
+        
+        # Handle sensitivity warning
+        try:
+            sensitivity_selectors = self.selectors.get_selectors('sensitivity_link')
+            for selector in sensitivity_selectors:
+                elements = self.wd.find_elements(By.PARTIAL_LINK_TEXT, "Some videos are not shown")
+                for element in elements:
+                    if element.is_displayed():
+                        element.click()
+                        time.sleep(2)
+                        break
+        except Exception as e:
+            logger.debug(f"No sensitivity warning found: {e}")
     
-    def get_recommended_videos(self, type='popular'):
-        '''
-        Scapes recommended videos on bitchute homepage.
-
-        Parameters:
-        type (str): POPULAR, TRENDING, ALL
-
-        Returns:
-        data: Dataframe of recommended videos.
-        '''
-        if type == 'popular':
-            src = self.call(self.bitchute_base)
-            data = self.parser(src, type='recommended_videos', kind='popular')
-            return data
-        elif type == 'trending':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-day')
-            return data
-        elif type == 'trending-day':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-day')
-            return data
-        elif type == 'trending-week':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-week')
-            return data
-        elif type == 'trending-month':
-            src = self.call(self.bitchute_base, click_link_text='TRENDING')
-            data = self.parser(src, type='recommended_videos', kind='trending-month')
-            return data
-        elif type == 'all':
-            src = self.call(self.bitchute_base, click_link_text='ALL')
-            data = self.parser(src, type='recommended_videos', kind='all')
-            return data
+    def _click_element_safe(self, element_text: str):
+        """Safely click an element by text"""
+        try:
+            wait = WebDriverWait(self.wd, 10)
+            element = wait.until(
+                EC.element_to_be_clickable((By.PARTIAL_LINK_TEXT, element_text))
+            )
+            element.click()
+            time.sleep(2)
+        except TimeoutException:
+            logger.warning(f"Element with text '{element_text}' not found or not clickable")
+        except Exception as e:
+            logger.warning(f"Error clicking element '{element_text}': {e}")
+    
+    def _smart_scroll(self, max_items: Optional[int] = None):
+        """Implement smart scrolling with item count limits"""
+        if max_items:
+            target_iterations = (max_items // 10) + 1
         else:
-            print('Wrong type. Accepted types are popular, trending and all.')
+            target_iterations = 1
+        
+        script = """
+        window.scrollTo(0, document.body.scrollHeight);
+        return document.body.scrollHeight;
+        """
+        
+        last_height = self.wd.execute_script(script)
+        iteration = 0
+        
+        while iteration < target_iterations:
+            iteration += 1
+            time.sleep(2)  # Wait for content to load
+            
+            new_height = self.wd.execute_script(script)
+            if new_height == last_height:
+                break  # No more content to load
+            
+            last_height = new_height
+            
+            if self.verbose:
+                logger.info(f"Scroll iteration {iteration}/{target_iterations}")
+    
+    def search(self, query: str, max_results: int = 100) -> pd.DataFrame:
+        """Enhanced search with better error handling"""
+        try:
+            url = self.url_patterns['search'].format(query)
+            page_source = self._fetch_page(url, max_items=max_results)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            parser = SearchPageParser(soup, self.selectors)
+            videos = parser.parse()
+            
+            # Convert to DataFrame
+            data = [asdict(video) for video in videos[:max_results]]
+            df = pd.DataFrame(data)
+            
+            # Download thumbnails if requested
+            if self.download_thumbnails and not df.empty:
+                df = self._download_thumbnails_sync(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Search failed for query '{query}': {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
+    def get_video(self, video_id: str) -> Optional[VideoData]:
+        """Get detailed video information"""
+        try:
+            url = self.url_patterns['video'].format(video_id)
+            page_source = self._fetch_page(url, scroll=False)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            parser = VideoPageParser(soup, self.selectors)
+            video = parser.parse()
+            
+            # Download thumbnail if requested
+            if self.download_thumbnails and video and video.thumbnail_url:
+                video.thumbnail_url = self._download_single_thumbnail(video.thumbnail_url, video.id)
+            
+            return video
+            
+        except Exception as e:
+            logger.error(f"Failed to get video {video_id}: {e}")
             return None
+        finally:
+            self.reset_webdriver()
+    
+    def _download_single_thumbnail(self, thumbnail_url: str, video_id: str) -> str:
+        """Download a single thumbnail synchronously"""
+        try:
+            if not thumbnail_url:
+                return thumbnail_url
+            
+            # Create filename with hash to avoid duplicates
+            url_hash = hashlib.md5(thumbnail_url.encode()).hexdigest()[:8]
+            extension = Path(urlparse(thumbnail_url).path).suffix or '.jpg'
+            filename = f"{video_id}_{url_hash}{extension}"
+            filepath = self.thumbnail_dir / filename
+            
+            # Skip if already downloaded
+            if filepath.exists():
+                return str(filepath)
+            
+            # Download the thumbnail
+            response = requests.get(thumbnail_url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            logger.info(f"Downloaded thumbnail: {filename}")
+            return str(filepath)
+            
+        except Exception as e:
+            logger.warning(f"Failed to download thumbnail {thumbnail_url}: {e}")
+            return thumbnail_url
+    
+    def _download_thumbnails_sync(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Download thumbnails synchronously for a DataFrame of videos"""
+        if 'thumbnail_url' not in df.columns or 'id' not in df.columns:
+            return df
+        
+        df = df.copy()
+        for idx, row in df.iterrows():
+            if row['thumbnail_url']:
+                local_path = self._download_single_thumbnail(row['thumbnail_url'], row['id'])
+                df.at[idx, 'thumbnail_local_path'] = local_path
+        
+        return df
+    
+    async def _download_thumbnails_async(self, videos: List[VideoData]) -> List[VideoData]:
+        """Download thumbnails asynchronously for better performance"""
+        async def download_single(session: aiohttp.ClientSession, video: VideoData) -> VideoData:
+            if not video.thumbnail_url:
+                return video
+            
+            try:
+                url_hash = hashlib.md5(video.thumbnail_url.encode()).hexdigest()[:8]
+                extension = Path(urlparse(video.thumbnail_url).path).suffix or '.jpg'
+                filename = f"{video.id}_{url_hash}{extension}"
+                filepath = self.thumbnail_dir / filename
+                
+                if filepath.exists():
+                    video.thumbnail_local_path = str(filepath)
+                    return video
+                
+                async with session.get(video.thumbnail_url) as response:
+                    response.raise_for_status()
+                    content = await response.read()
+                    
+                    with open(filepath, 'wb') as f:
+                        f.write(content)
+                    
+                    video.thumbnail_local_path = str(filepath)
+                    logger.info(f"Downloaded thumbnail: {filename}")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to download thumbnail for {video.id}: {e}")
+                video.thumbnail_local_path = video.thumbnail_url
+            
+            return video
+        
+        # Download thumbnails concurrently
+        async with aiohttp.ClientSession() as session:
+            tasks = [download_single(session, video) for video in videos]
+            return await asyncio.gather(*tasks)
+    
+    def get_trending_videos(self, timeframe: str = 'day') -> pd.DataFrame:
+        """Get trending videos with timeframe support"""
+        try:
+            click_elements = ['TRENDING']
+            if timeframe == 'week':
+                click_elements.append('WEEK')
+            elif timeframe == 'month':
+                click_elements.append('MONTH')
+            
+            page_source = self._fetch_page(self.base_url, click_elements=click_elements)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            parser = SearchPageParser(soup, self.selectors)
+            videos = parser.parse()
+            
+            # Convert to DataFrame
+            data = [asdict(video) for video in videos]
+            df = pd.DataFrame(data)
+            
+            if self.download_thumbnails and not df.empty:
+                df = self._download_thumbnails_sync(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get trending videos: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
+    def get_popular_videos(self) -> pd.DataFrame:
+        """Get popular videos from homepage"""
+        try:
+            page_source = self._fetch_page(self.base_url)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            parser = SearchPageParser(soup, self.selectors)
+            videos = parser.parse()
+            
+            data = [asdict(video) for video in videos]
+            df = pd.DataFrame(data)
+            
+            if self.download_thumbnails and not df.empty:
+                df = self._download_thumbnails_sync(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get popular videos: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
+    def get_channel_info(self, channel_id: str) -> Optional[ChannelData]:
+        """Get detailed channel information"""
+        try:
+            url = self.url_patterns['channel'].format(channel_id)
+            page_source = self._fetch_page(url, click_elements=['ABOUT'], scroll=False)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            channel = ChannelData()
+            channel.id = channel_id
+            
+            # Extract channel title
+            name_elem = soup.find(class_='name')
+            if name_elem:
+                channel.title = name_elem.get_text().strip()
+            
+            # Extract description
+            desc_elem = soup.find(id='channel-description')
+            if desc_elem:
+                channel.description = markdownify.markdownify(desc_elem.decode_contents())
+            
+            # Extract statistics from channel-about-details
+            details_elem = soup.find(class_='channel-about-details')
+            if details_elem:
+                for p_elem in details_elem.find_all('p'):
+                    text = p_elem.get_text().strip()
+                    if 'videos' in text.lower():
+                        try:
+                            channel.video_count = int(text.split()[1])
+                        except (IndexError, ValueError):
+                            pass
+                    elif 'subscribers' in text.lower():
+                        channel.subscriber_count = text.split()[1]
+                    elif 'created' in text.lower():
+                        channel.created_at = text
+            
+            return channel
+            
+        except Exception as e:
+            logger.error(f"Failed to get channel info for {channel_id}: {e}")
+            return None
+        finally:
+            self.reset_webdriver()
+    
+    def get_channel_videos(self, channel_id: str, max_videos: Optional[int] = None) -> pd.DataFrame:
+        """Get videos from a specific channel"""
+        try:
+            url = self.url_patterns['channel'].format(channel_id)
+            page_source = self._fetch_page(url, click_elements=['VIDEOS'], max_items=max_videos)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            videos = []
+            video_containers = soup.find_all(class_='channel-videos-container')
+            
+            for i, container in enumerate(video_containers, 1):
+                try:
+                    video = VideoData()
+                    video.channel_id = channel_id
+                    
+                    # Extract title and ID
+                    title_elem = container.find(class_='channel-videos-title')
+                    if title_elem and title_elem.find('a'):
+                        video.title = title_elem.get_text().strip()
+                        href = title_elem.find('a').get('href', '')
+                        video.id = href.split('/')[-2] if href else ''
+                    
+                    # Extract description
+                    desc_elem = container.find(class_='channel-videos-text')
+                    if desc_elem:
+                        video.description = markdownify.markdownify(desc_elem.decode_contents())
+                    
+                    # Extract duration
+                    duration_elem = container.find(class_='video-duration')
+                    if duration_elem:
+                        video.duration = duration_elem.get_text().strip()
+                    
+                    # Extract views
+                    views_elem = container.find(class_='video-views')
+                    if views_elem:
+                        views_text = views_elem.get_text().strip()
+                        video.view_count = self._process_views(views_text)
+                    
+                    # Extract creation date
+                    date_elem = container.find(class_='channel-videos-details')
+                    if date_elem:
+                        video.created_at = date_elem.get_text().strip()
+                    
+                    videos.append(video)
+                    
+                    if max_videos and len(videos) >= max_videos:
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to parse video container {i}: {e}")
+                    continue
+            
+            # Convert to DataFrame
+            data = [asdict(video) for video in videos]
+            df = pd.DataFrame(data)
+            
+            if self.download_thumbnails and not df.empty:
+                df = self._download_thumbnails_sync(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get videos for channel {channel_id}: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
+    def _process_views(self, views_str: str) -> int:
+        """Convert view count string to integer with enhanced parsing"""
+        try:
+            # Clean the string
+            views = views_str.lower().replace(',', '').replace(' ', '').replace('views', '')
+            
+            # Handle different formats
+            if 'k' in views:
+                num = float(views.replace('k', ''))
+                return int(num * 1000)
+            elif 'm' in views:
+                num = float(views.replace('m', ''))
+                return int(num * 1000000)
+            elif 'b' in views:
+                num = float(views.replace('b', ''))
+                return int(num * 1000000000)
+            else:
+                # Try to extract number directly
+                import re
+                numbers = re.findall(r'\d+', views)
+                if numbers:
+                    return int(numbers[0])
+                return 0
+        except (ValueError, AttributeError, IndexError):
+            return 0
+    
+    def export_data(self, data: pd.DataFrame, filename: str, format: str = 'csv'):
+        """Export data in various formats"""
+        try:
+            filepath = Path(filename)
+            
+            if format.lower() == 'csv':
+                data.to_csv(filepath, index=False)
+            elif format.lower() == 'json':
+                data.to_json(filepath, orient='records', indent=2)
+            elif format.lower() == 'excel':
+                data.to_excel(filepath, index=False)
+            elif format.lower() == 'parquet':
+                data.to_parquet(filepath, index=False)
+            else:
+                raise ValueError(f"Unsupported format: {format}")
+            
+            logger.info(f"Data exported to {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Failed to export data: {e}")
+            raise
+    
+    def validate_selectors(self, test_url: str = None) -> Dict[str, bool]:
+        """Validate current selectors against a test page"""
+        test_url = test_url or self.base_url
+        results = {}
+        
+        try:
+            page_source = self._fetch_page(test_url, scroll=False)
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            for element_type, selectors in self.selectors.selectors.items():
+                found = False
+                for selector in selectors:
+                    try:
+                        elements = soup.select(selector)
+                        if elements:
+                            found = True
+                            break
+                    except Exception:
+                        continue
+                results[element_type] = found
+            
+        except Exception as e:
+            logger.error(f"Selector validation failed: {e}")
+        finally:
+            self.reset_webdriver()
+        
+        return results
+    
+    def update_selectors(self, new_selectors: Dict[str, List[str]]):
+        """Update selector configuration"""
+        for element_type, selectors in new_selectors.items():
+            if element_type in self.selectors.selectors:
+                self.selectors.selectors[element_type] = selectors
+            else:
+                logger.warning(f"Unknown element type: {element_type}")
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensure cleanup"""
         self.reset_webdriver()
 
-    def get_popular_videos(self):
-        videos, tags = self.get_recommended_videos(type='popular')
-        return videos
+
+# Backward compatibility layer
+class Crawler(EnhancedCrawler):
+    """Backward compatible interface"""
+    
+    def __init__(self, headless=True, verbose=False, chrome_driver=None):
+        super().__init__(headless=headless, verbose=verbose, chrome_driver=chrome_driver)
     
     def get_trending_videos(self):
-        videos, tags = self.get_recommended_videos(type='trending')
-        return videos
+        """Backward compatible trending videos method"""
+        return super().get_trending_videos('day')
+    
     def get_trending_tags(self):
-        videos, tags = self.get_recommended_videos(type='trending')
-        return tags
+        """Get trending tags (backward compatible)"""
+        try:
+            page_source = self._fetch_page(self.base_url, click_elements=['TRENDING'])
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            tags = []
+            tag_elements = soup.select('.sidebar.tags li a')
+            
+            for i, tag_elem in enumerate(tag_elements, 1):
+                tag_data = {
+                    'rank': i,
+                    'tag_name': tag_elem.get_text().strip(),
+                    'tag_url': tag_elem.get('href', ''),
+                    'scrape_time': str(int(datetime.utcnow().timestamp()))
+                }
+                tags.append(tag_data)
+            
+            return pd.DataFrame(tags)
+            
+        except Exception as e:
+            logger.error(f"Failed to get trending tags: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
     def get_trending(self):
-        videos, tags = self.get_recommended_videos(type='trending')
+        """Get both trending videos and tags (backward compatible)"""
+        videos = self.get_trending_videos()
+        tags = self.get_trending_tags()
         return videos, tags
     
     def get_all_videos(self):
-        videos, tags = self.get_recommended_videos(type='all')
-        return videos
-
+        """Get all videos from homepage (backward compatible)"""
+        try:
+            page_source = self._fetch_page(self.base_url, click_elements=['ALL'])
+            soup = BeautifulSoup(page_source, 'html.parser')
+            parser = SearchPageParser(soup, self.selectors)
+            videos = parser.parse()
+            
+            data = [asdict(video) for video in videos]
+            return pd.DataFrame(data)
+            
+        except Exception as e:
+            logger.error(f"Failed to get all videos: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
     def get_recommended_channels(self, extended=True):
-        '''
-        Scapes recommended channels on bitchute homepage.
-
-        Parameters:
-        extended (bool): whether to retrieve extended channel information. Default: True
-
-        Returns:
-        data: Dataframe of recommended channels.
-        '''
-        src = self.call(self.bitchute_base, scroll=False)
-        data = self.parser(src, type='recommended_channels', extended=extended)
-        self.reset_webdriver()
-        return data
-
-    def _get_channel(self, channel_id, get_channel_about=True, get_channel_videos=True):
-        '''
-        Scapes channel information.
-
-        Parameters:
-        channel_id (str): ID of channel to be scraped.
-        get_channel_about (bool): Get the about information by a channel. Default:True 
-        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
-
-        Returns:
-        about_data: Dataframe of channel about.
-        videos_data: Dataframe of channel videos.
-        '''
-
-        if get_channel_about:
-            channel_about_url = self.channel_base.format(channel_id)
-            src = self.call(channel_about_url, click_link_text='ABOUT', scroll=False)
-            about_data = self.parser(src, type='channel_about')
-        else:
-            about_data = pd.DataFrame()
-
-        if get_channel_videos:
-            channel_videos_url = self.channel_base.format(channel_id)
-            src = self.call(channel_videos_url, click_link_text='VIDEOS')
-            videos_data = self.parser(src, type='channel_videos')
-        else:
-            videos_data = pd.DataFrame()
-
-        return about_data, videos_data
-
-    def get_channels(self, channel_ids, get_channel_about=True, get_channel_videos=True):
-        '''
-        Scapes information for multiple channels.
-
-        Parameters:
-        channel_ids (list): List of channel ids to be scraped.
-        get_channel_about (bool): Get the about information by a channel. Default:True 
-        get_channel_videos (bool): Get the information of videos published by a channel. Default:True
-
-        Returns:
-        abouts: Dataframe of channel abouts.
-        videos: Dataframe of channel videos.
-        '''
-        if type(channel_ids) == str:
-            abouts, videos = self._get_channel(channel_ids, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
-            self.reset_webdriver()
-            return abouts, videos
-        elif type(channel_ids) == list:
-            abouts = pd.DataFrame()
-            videos = pd.DataFrame()
-            for channel_id in (tqdm(channel_ids) if not self.verbose else channel_ids):
-                about_tmp, videos_tmp = self._get_channel(channel_id, get_channel_about=get_channel_about, get_channel_videos=get_channel_videos)
-                abouts = pd.concat([abouts, about_tmp])
-                videos = pd.concat([videos, videos_tmp])
-            self.reset_webdriver()
-            return abouts, videos
-        else:
-            print('channel_ids must be of type list for multiple or str for single channels')
-            return None
-
-    
-    def _get_video(self, video_id):
-        '''
-        Scrapes video metadata.
-
-        Parameters:
-        video_id (str): ID of video to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        video_url = self.video_base.format(video_id)
-        src = self.call(video_url, scroll=False)
-        video_data = self.parser(src, type='video')
-        return video_data
-
-    def get_videos(self, video_ids):
-        '''
-        Scapes metadata of multiple videos.
-
-        Parameters:
-        video_ids (list): List of video ids to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        if type(video_ids) == str:
-            try:
-                video_data = self._get_video(video_ids)
-                self.reset_webdriver()
-                return video_data
-            except:
-                print('Failed for video with id {}'.format(video_ids))
-        elif type(video_ids) == list:
-            video_data = pd.DataFrame()
-            for video_id in (tqdm(video_ids) if not self.verbose else video_ids):
-                try:
-                    video_tmp = self._get_video(video_id)                
-                    if video_tmp is not None:
-                        video_data = pd.concat([video_data, video_tmp])
-                except:
-                    print('Failed for video with id {}'.format(video_id))
-                    self.reset_webdriver()
-            self.reset_webdriver()
-            return video_data
-        else:
-            print('video_ids must be of type list for multiple or str for single video')
-            return None 
-
-    def _get_hashtag(self, hashtag):
-        '''
-        Scapes video posted with a tag.
-
-        Parameters:
-        tag (str): Hashtag to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-        hashtag_url = self.hashtag_base.format(hashtag)
-        src = self.call(hashtag_url)
-        video_data = self.parser(src, type='hashtag_videos')
-        video_data['hashtag'] = hashtag
-        return video_data
-
-    def get_hashtags(self, hashtags):
-        '''
-        Scapes video posted with a tag.
-
-        Parameters:
-        tag (str): Hashtag to be scraped.
-        
-        Returns:
-        video_data: Dataframe of video metadata.
-        '''
-
-        if type(hashtags) == str:
-            video_data = self._get_hashtag(hashtags)
-            video_data['hashtag'] = hashtags
-            self.reset_webdriver()   
-            return video_data
-        elif type(hashtags) == list:
-            video_data = pd.DataFrame()
-            for hashtag in (tqdm(hashtags) if not self.verbose else hashtags):
-                video_tmp = self._get_hashtag(hashtag)
-                if video_tmp is not None:
-                    video_tmp['hashtag'] = hashtag             
-                    video_data = video_data.pd.concat([video_tmp])
-            self.reset_webdriver()
-            return video_data
-        else:
-            print('hashtags must be of type list for multiple or str for single hashtag')
-            return None 
-
-    def parser(self, src, type=None, kind=None, extended=False):
-        scrape_time = str(int(datetime.utcnow().timestamp()))
-        
-        soup = BeautifulSoup(src, 'html.parser')
-        if soup.find('h1') and ("404 - Page not found" in soup.find('h1').text or "404 - PAGE NOT FOUND" in soup.find('h1').text):
-            return None
-
-        if not type:
-            raise 'A parse type needs to be passed.'
-        
-        elif type == 'video_search' or type == 'hashtag_videos':
-            videos = []
-            soup = BeautifulSoup(src, 'html.parser')
-            if soup.find(class_='results-list'):
-                counter = 0
-                for result in soup.find(class_='results-list').find_all(class_='video-result-container'):
-                    counter += 1
-                    title = None
-                    id_ = None
-                    view_count = None
-                    duration = None
-                    channel = None
-                    channel_url = None
-                    description = None
-                    description_links = []
-                    created_at = None
-
-                    if result.find(class_='video-result-title'):
-                        title = result.find(class_='video-result-title').text.strip('\n').strip()
-                        id_ = result.find(class_='video-result-title').find('a').get('href').split('/')[-2]
-
-                    if result.find(class_='video-views'):
-                        view_count = self.process_views(result.find(class_='video-views').text.strip('\n').strip())
-
-                    if result.find(class_='video-duration'):
-                        duration = result.find(class_='video-duration').text.strip('\n').strip()
-
-                    if result.find(class_='video-result-channel'):
-                        channel = result.find(class_='video-result-channel').text.strip('\n').strip()
-                        channel_id = result.find(class_='video-result-channel').find('a').get('href').split('/')[-2]
-
-                    if result.find(class_='video-result-text'):
-                        description = result.find(class_='video-result-text').decode_contents()
-                        description = description.strip('\n')
-                        description = markdownify.markdownify(description)
-
-                        for link in result.find(class_='video-result-text').find_all('a'):
-                            description_links.append(link.get('href'))
-
-                    if result.find(class_='video-result-details'):
-                        created_at = result.find(class_='video-result-details').text.strip('\n').strip()
-
-                    
-                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, description, description_links, created_at, scrape_time])
-
-            videos_columns = ['rank', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'description', 'description_links', 'created_at', 'scrape_time']
-            videos = pd.DataFrame(videos, columns=videos_columns)
-            return videos
-
-        elif type == 'recommended_channels':
+        """Get recommended channels (backward compatible)"""
+        try:
+            page_source = self._fetch_page(self.base_url, scroll=False)
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
             channels = []
-            channel_ids = []
-            soup = BeautifulSoup(src, 'html.parser')
-            counter = 0
-            if soup.find(id='carousel'):
-                for item in soup.find(id='carousel').find_all(class_='channel-card'):
-                    counter += 1
-                    id_ = item.find('a').get('href').split('/')[-2]
-                    name = item.find(class_='channel-card-title').text
-                    channels.append([counter, id_, name, scrape_time])
-                    channel_ids.append(id_)
-            if extended:
-                channel_ids = list(set(channel_ids))
-                channels, videos = self.get_channels(channel_ids, get_channel_videos=False)
-            else:
-                columns = ['rank', 'id', 'name', 'scrape_time']
-                channels = pd.DataFrame(channels, columns=columns)
-                channels = channels.drop_duplicates(subset=['id'])
-            return channels
-
-        
-        elif type == 'recommended_videos':
-            videos = []
-            tags = []
-            soup = BeautifulSoup(src, 'html.parser')
-
-            if kind == 'popular':
-                if soup.find(id='listing-popular'):
-                    soup = soup.find(id='listing-popular')
-                else:
-                    return None
+            carousel = soup.find(id='carousel')
+            
+            if carousel:
+                channel_cards = carousel.find_all(class_='channel-card')
                 
-            elif kind == 'trending-day':
-                if soup.find(id='trending-day'):
-                    soup = soup.find(id='trending-day')
-                else:
-                    return None
-
-            elif kind == 'trending-week':
-                if soup.find(id='trending-week'):
-                    soup = soup.find(id='trending-week')
-                else:
-                    return None
-
-            elif kind == 'trending-month':
-                if soup.find(id='trending-month'):
-                    soup = soup.find(id='trending-month')
-                else:
-                    return None
+                for i, card in enumerate(channel_cards, 1):
+                    try:
+                        link_elem = card.find('a')
+                        title_elem = card.find(class_='channel-card-title')
+                        
+                        if link_elem and title_elem:
+                            channel_id = link_elem.get('href', '').split('/')[-2]
+                            channel_name = title_elem.get_text().strip()
+                            
+                            channel_data = {
+                                'rank': i,
+                                'id': channel_id,
+                                'name': channel_name,
+                                'scrape_time': str(int(datetime.utcnow().timestamp()))
+                            }
+                            channels.append(channel_data)
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to parse channel card {i}: {e}")
+                        continue
+            
+            df = pd.DataFrame(channels)
+            
+            # If extended info is requested, get detailed channel information
+            if extended and not df.empty:
+                detailed_channels = []
+                for _, row in df.iterrows():
+                    channel_info = self.get_channel_info(row['id'])
+                    if channel_info:
+                        detailed_data = asdict(channel_info)
+                        detailed_data['rank'] = row['rank']
+                        detailed_channels.append(detailed_data)
+                
+                if detailed_channels:
+                    df = pd.DataFrame(detailed_channels)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get recommended channels: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
     
-            elif kind == 'all':
-                if soup.find(id='listing-all'):
-                    soup = soup.find(id='listing-all')
-                else:
-                    return None
-            else:
-                print('kind needs to be passed for recommendations.')
-                return None
-
-            if soup.find(class_='video-result-container'):
-                counter = 0
-                for video in soup.find_all(class_='video-result-container'):
-                    counter += 1
-                    title = None
-                    id_ = None
-                    view_count = None
-                    duration = None
-                    channel = None
-                    channel_url = None
-                    created_at = None
-
-                    if video.find(class_='video-result-title'):
-                        title = video.find(class_='video-result-title').text.strip('\n')
-                        id_ = video.find(class_='video-result-title').find('a').get('href').split('/')[-2]
+    def get_channels(self, channel_ids, get_channel_about=True, get_channel_videos=True):
+        """Get channel information (backward compatible)"""
+        if isinstance(channel_ids, str):
+            channel_ids = [channel_ids]
+        
+        abouts = pd.DataFrame()
+        videos = pd.DataFrame()
+        
+        for channel_id in (tqdm(channel_ids) if not self.verbose else channel_ids):
+            try:
+                if get_channel_about:
+                    about_data = self.get_channel_info(channel_id)
+                    if about_data:
+                        about_df = pd.DataFrame([asdict(about_data)])
+                        abouts = pd.concat([abouts, about_df], ignore_index=True)
+                
+                if get_channel_videos:
+                    videos_df = self.get_channel_videos(channel_id)
+                    videos = pd.concat([videos, videos_df], ignore_index=True)
                     
-                    if video.find(class_='video-views'):
-                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n'))
-                    if video.find(class_='video-duration'):
-                        duration = video.find(class_='video-duration').text.strip('\n')
-                    
-                    if video.find(class_='video-result-channel'):
-                        channel = video.find(class_='video-result-channel').text.strip('\n')
-                        channel_id = video.find(class_='video-result-channel').find('a').get('href').split('/')[-2]
-                    if video.find(class_='video-result-details'):
-                        created_at = video.find(class_='video-result-details').text.strip('\n')
-                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
-
-            elif soup.find(class_='video-card'):
-                counter = 0
-                for video in soup.find_all(class_='video-card'):
-                    counter += 1
-                    title = None
-                    id_ = None
-                    view_count = None
-                    duration = None
-                    channel = None
-                    channel_url = None
-                    created_at = None
-
-                    if video.find(class_='video-card-title'):
-                        title = video.find(class_='video-card-title').text.strip('\n').strip()
-                    if video.find(class_='video-card-id'):
-                        id_ = video.find(class_='video-card-id').text.strip('\n').strip()
-                    if video.find(class_='video-views'):
-                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n').strip())
-                    if video.find(class_='video-duration'):
-                        duration = video.find(class_='video-duration').text.strip('\n').strip()
-                    if video.find(class_='video-card-channel'):
-                        channel = video.find(class_='video-card-channel').text.strip('\n').strip()
-                        channel_id = video.find(class_='video-card-channel').find('a').get('href').split('/')[-2]
-                    if video.find(class_='video-card-published'):
-                        created_at = video.find(class_='video-card-published').text.strip('\n').strip()
-                    videos.append([counter, id_, title, view_count, duration, channel, channel_id, created_at, scrape_time])
-            
-            
-            soup = BeautifulSoup(src, 'html.parser')
-            if soup.find(class_='sidebar tags'):
-                counter = 0
-                for tag in soup.find(class_='sidebar tags').find_all('li'):
-                    counter += 1
-                    tag_name = tag.text.strip('\n').strip()
-                    tag_url = tag.find('a').get('href')
-                    tags.append([counter, tag_name, tag_url, scrape_time])
-            
-            videos_columns = ['rank', 'id', 'title', 'view_count', 'duration', 'channel', 'channel_id', 'created_at', 'scrape_time']
-            videos = pd.DataFrame(videos, columns=videos_columns)
-
-            tags_columns = ['rank', 'tag_name', 'tag_url', 'scrape_time']
-            tags = pd.DataFrame(tags, columns=tags_columns)
-
-            return videos, tags
-
-        elif type == 'channel_about':
-            uid = None
-            id_ = None
-            title = None
-            owner = None
-            owner_link = None
-            description = None
-            description_links = []
-            social_links = []
-            category = None
-            video_count = None
-            subscriber_count = None
-            view_count = None
-            created_at = None
-
-            soup = BeautifulSoup(src, 'html.parser')            
-            if soup.find('link', id='canonical'):
-                uid = soup.find('link', id='canonical').get('href').split('/')[-2]
-            if soup.find(class_='name'):
-                title = soup.find(class_='name').text.strip('\n').strip()
-                if soup.find(class_='name').find('a'):
-                    id_ = soup.find(class_='name').find('a').get('href').strip('/').split('/')[1]
-            if soup.find(class_='owner'):
-                owner = soup.find(class_='owner').text.strip('\n').strip()
-                owner_link = soup.find(class_='owner').find('a').get('href')
-            if soup.find(id='channel-description'):
-                description = soup.find(id='channel-description').decode_contents()
-                description = description.strip('\n')
-                description = markdownify.markdownify(description)
-                for link in soup.find(id='channel-description').find_all('a'):
-                    description_links.append(link.get('href'))
-            if soup.find(class_='social'):
-                for link in soup.find(class_='social').find_all('a'):
-                    social_links.append([link.get('data-original-title'), link.get('href')])
-            if soup.find(class_='channel-about-details'):
-                for elem in soup.find(class_='channel-about-details').find_all('p'):
-                    if 'Category' in elem.text and elem.find('a'):
-                        category = elem.find('a').text.strip('\n').strip()
-                    elif elem.find(class_='fa-video'):
-                        video_count = elem.text.split(' ')[1]
-                    elif elem.find(class_='fa-users'):
-                        subscriber_count = elem.text.split(' ')[1]
-                    elif elem.find(class_='fa-eye'):
-                        view_count = self.process_views(elem.text.split(' ')[1])
-                    else:
-                        created_at = elem.text.strip('\n').strip()
-                        pass
-            data = [uid, id_, title, description, description_links, video_count, subscriber_count, view_count, created_at, category, social_links, owner, owner_link, scrape_time]
-            columns = ['uid', 'id', 'title', 'description', 'description_links', 'video_count', 'subscriber_count', 'view_count', 'created_at', 'category', 'social_links', 'owner', 'owner_link', 'scrape_time']
-            data = pd.DataFrame([data], columns=columns)
-            return data
-
-        elif type == 'channel_videos':
-            soup = BeautifulSoup(src, 'html.parser')
-            data = []
-
-            if soup.find('link', id='canonical').get('href'):
-                channel_id = soup.find('link', id='canonical').get('href').split('/')[-2]
-            else:
-                channel_id = None
-            if soup.find(class_='name'):
-                channel_title = soup.find(class_='name').text.strip('\n')
-            else:
-                channel_title = None
-            if soup.find(class_='channel-videos-list'):
-                for video in soup.find(class_='channel-videos-list').find_all(class_='channel-videos-container'):
-                    if video.find(class_='channel-videos-title'):
-                        title = video.find(class_='channel-videos-title').text.strip('\n')
-                        video_id = video.find(class_='channel-videos-title').find('a').get('href').split('/')[-2]
-                    else:
-                        title = None
-                        video_id = None
-                    if video.find(class_='channel-videos-text'):
-                        description = video.find(class_='channel-videos-text').decode_contents()
-                        description = description.strip('\n')
-                        description = markdownify.markdownify(description)
-                        description_links = [a.get('href') for a in video.find(class_='channel-videos-text').find_all('a')]
-                    else:
-                        description = None
-                        description_links = []
-                    if video.find(class_='video-duration'):
-                        duration = video.find(class_='video-duration').text.strip('\n').strip()
-                    else:
-                        duration = None
-                    if video.find(class_='channel-videos-details'):
-                        created_at = str(parser.parse( video.find(class_='channel-videos-details').text.replace('\n', '')).date())
-                    else:
-                        created_at = None
-                    if video.find(class_='video-views'):
-                        view_count = self.process_views(video.find(class_='video-views').text.strip('\n').strip())
-                    else:
-                        view_count = None
-
-                    data.append([channel_id, channel_title, video_id, title, created_at, duration, view_count, description, description_links, scrape_time])
-            
-            columns = ['channel_id', 'channel_title', 'video_id', 'title', 'created', 'duration', 'view_count', 'description', 'description_links', 'scrape_time']
-            data = pd.DataFrame(data, columns=columns)
-            return data
-            
-        elif type == 'video':
-            id_ = None
-            title = None
-            description = None
-            description_links = []
-            view_count = None
-            like_count = None
-            dislike_count = None
-            created_at = None
-            hashtags = []
-            category = None
-            sensitivity = None
-            channel_name = None
-            channel_id = None
-            owner_name = None
-            owner_id = None
-            subscribers = None
-            next_id = None
-            related_ids = []
-
-            soup = BeautifulSoup(src, 'html.parser')
-            
-            if soup.find(id='canonical'):
-                id_ = soup.find(id='canonical').get('href').split('/')[-2]
-            if soup.find(id='video-title'):
-                title = soup.find(id='video-title').text.strip('\n').strip()
-            if soup.find(id='video-view-count'):
-                view_count = self.process_views(soup.find(id='video-view-count').text.strip('\n').strip())
-            if soup.find(id='video-like-count'):
-                like_count = soup.find(id='video-like-count').text.strip('\n').strip()
-            if soup.find(id='video-dislike-count'):
-                dislike_count = soup.find(id='video-dislike-count').text.strip('\n').strip()
-            if soup.find(class_='video-publish-date'):
-                created_at = soup.find(class_='video-publish-date').text.strip('\n').strip().replace('First published at ', '')
-                created_at = parser.parse(created_at)
-
-            if soup.find(id='video-hashtags'):
-                if soup.find(id='video-hashtags').find('li'):
-                    for tag in soup.find(id='video-hashtags').find_all('li'):
-                        hashtags.append(tag.text.strip('\n'))
-            if soup.find(id='video-description'):
-                description = soup.find(id='video-description').decode_contents()
-                description = description.strip('\n')
-                description = markdownify.markdownify(description)
-
-                if soup.find(id='video-description').find('a'):
-                    for link in soup.find(id='video-description').find_all('a'):
-                        description_links.append(link.get('href'))
-            if soup.find(class_='video-detail-list'):
-                if soup.find(class_='video-detail-list').find('tr'):
-                    for row in soup.find(class_='video-detail-list').find_all('tr'):
-                        value = row.find('a').text
-                        if 'Category' in row.text:
-                            category = value
-                        elif 'Sensitivity' in row.text:
-                            sensitivity = value
-            if soup.find(class_='channel-banner'):
-                channel_data = soup.find(class_='channel-banner')
-                if channel_data.find(class_='name'):
-                    channel_name = channel_data.find(class_='name').text.strip('\n').strip()
-                    channel_id = channel_data.find(class_='name').find('a').get('href').split('/')[-2]
-                if channel_data.find(class_='owner'):
-                    owner_name = channel_data.find(class_='owner').text.strip('\n').strip()
-                    owner_id = channel_data.find(class_='owner').find('a').get('href').split('/')[-2]
-                if channel_data.find(class_='subscribers'):
-                    subscribers = channel_data.find(class_='subscribers').text.replace('subscribers', '').strip()
-
-            if soup.find(class_='sidebar-next'):
-                if soup.find(class_='sidebar-next').find(class_='video-card-title'):
-                    next_id = soup.find(class_='sidebar-next').find(class_='video-card-title').find('a').get('href').split('/')[-2]
-
-            if soup.find(class_='sidebar-recent'):
-                if soup.find(class_='sidebar-recent').find(class_='video-card-title'):
-                    for item in soup.find(class_='sidebar-recent').find_all(class_='video-card-title'):
-                        related_ids.append(item.find('a').get('href').split('/')[-2])
-
-            columns = ['id', 'title', 'description', 'description_links', 'view_count', 'like_count', 'dislike_count', 'created', 'hashtags', 'category', 'sensitivity', 'channel_name', 'channel_id', 'owner_name', 'owner_id', 'subscriber_count', 'next_video', 'releated_videos']
-            data = pd.DataFrame([[id_, title, description, description_links, view_count, like_count, dislike_count, created_at, hashtags, category, sensitivity, channel_name, channel_id, owner_name, owner_id, subscribers, next_id, related_ids]], columns=columns)
-            return data
-
-        else:
-            print('A correct type needs to be passed.')
-
-    def get_status(self, reset=True):
-        status = self.status
-        if reset:
-            self.status
-        return status
+            except Exception as e:
+                logger.error(f"Failed to process channel {channel_id}: {e}")
+                continue
+        
+        return abouts, videos
     
-    def set_status(self, message):
-        self.status.append(message)
-
+    def get_videos(self, video_ids):
+        """Get video information (backward compatible)"""
+        if isinstance(video_ids, str):
+            video_ids = [video_ids]
+        
+        videos = []
+        
+        for video_id in (tqdm(video_ids) if not self.verbose else video_ids):
+            try:
+                video_data = self.get_video(video_id)
+                if video_data:
+                    videos.append(asdict(video_data))
+            except Exception as e:
+                logger.error(f"Failed to get video {video_id}: {e}")
+                continue
+        
+        return pd.DataFrame(videos)
