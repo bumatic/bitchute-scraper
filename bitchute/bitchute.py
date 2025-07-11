@@ -1,6 +1,6 @@
 # Simple Python module for retrieving data from bitchute.
-# Created and maintained since 2022 by Marcus Burkhardt. Recent code changes 
-# with GenAI support by Claude.
+# Created and maintained since 2022 by Marcus Burkhardt. 
+# 2025 code enhancements with support by Claude.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,6 +14,15 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+# Enhanced Bitchute Scraper with improved architecture and error handling
+# Copyright (C) 2025 Enhanced by Claude
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 
 import time
 import logging
@@ -105,22 +114,115 @@ class SelectorConfig:
     """Configurable CSS selectors for Bitchute elements"""
     
     def __init__(self, config_file: Optional[str] = None):
-        # Default selectors based on original documentation
+        # Updated selectors based on actual 2025 Bitchute HTML structure
         self.selectors = {
-            'video_cards': ['.video-card', '.video-result-container'],
-            'video_title': ['.video-card-title a', '.video-result-title a'],
-            'video_channel': ['.video-card-channel a', '.video-result-channel a'],
-            'video_views': ['.video-views'],
-            'video_duration': ['.video-duration'],
-            'video_thumbnail': ['.video-card-image img', '.video-result-image img'],
-            'channel_cards': ['.channel-card'],
-            'channel_title': ['.channel-card-title', '.name a'],
-            'trending_tags': ['.sidebar.tags li a'],
-            'video_description': ['#video-description', '.video-result-text'],
-            'channel_description': ['#channel-description'],
-            'pagination_next': ['.next', '[aria-label="Next"]'],
-            'dismiss_button': ['button:contains("Dismiss")', '.dismiss'],
-            'sensitivity_link': ['a:contains("Some videos are not shown")']
+            # Video cards - confirmed from debug: .q-card works
+            'video_cards': [
+                '.q-card',  # Primary selector - found 21 elements
+                '#video-card',  # Specific video card ID
+                '.video-card', 
+                '.video-result-container',
+                '[data-video-id]'
+            ],
+            # Video titles - based on structure with .q-item__section
+            'video_title': [
+                '.q-item__section--main a',  # Links in main sections
+                '.q-item a[href*="/video/"]',  # Video links in items
+                'a[href*="/video/"]',  # Any video link
+                '.q-item__label a',  # Labels with links
+                '.video-card-title a', 
+                '.video-result-title a'
+            ],
+            # Video channels - look for channel links
+            'video_channel': [
+                'a[href*="/channel/"]',  # Any channel link
+                '.q-item__section a[href*="/channel/"]',
+                '.channel-name a',
+                '.video-card-channel a', 
+                '.video-result-channel a'
+            ],
+            # View counts - look in various containers
+            'video_views': [
+                '.q-item__label:contains("visibility")',  # Based on debug output
+                '.view-count',
+                '.views',
+                '.q-item__section .q-item__label',
+                '.video-views',
+                '[data-views]'
+            ],
+            # Duration information
+            'video_duration': [
+                '.q-item__label',  # Duration might be in labels
+                '.duration',
+                '.time',
+                '.video-duration',
+                '.video-time'
+            ],
+            # Thumbnail images in q-img components
+            'video_thumbnail': [
+                '.q-img img',  # Quasar image components
+                '.q-img',  # The component itself might have background
+                '.video-card-image img',
+                '.video-result-image img',
+                '.thumbnail img'
+            ],
+            # Channel cards for recommendations
+            'channel_cards': [
+                '.q-card',  # Same structure as videos
+                '.channel-card',
+                '.channel-item',
+                '[data-channel-id]'
+            ],
+            # Channel titles
+            'channel_title': [
+                '.q-item__section--main',
+                '.channel-card-title',
+                '.name a',
+                '.channel-name'
+            ],
+            # Trending tags - updated for new button structure
+            'trending_tags': [
+                'a[href*="/hashtag/"]',  # Found in debug output
+                '.q-btn[href*="/hashtag/"]',
+                '.sidebar.tags li a',
+                '.tag-list a',
+                '.hashtag-list a'
+            ],
+            # Video descriptions
+            'video_description': [
+                '.q-item__section',
+                '#video-description',
+                '.video-result-text',
+                '.description',
+                '.content-description'
+            ],
+            # Channel descriptions
+            'channel_description': [
+                '#channel-description',
+                '.channel-desc',
+                '.about-text'
+            ],
+            # Navigation elements
+            'pagination_next': [
+                '.next',
+                '[aria-label="Next"]',
+                '.pagination-next',
+                '.q-btn:contains("Next")'
+            ],
+            # Dismiss buttons
+            'dismiss_button': [
+                'button:contains("Dismiss")',
+                '.dismiss',
+                '.close-button',
+                '[aria-label="Close"]',
+                '.q-btn:contains("Dismiss")'
+            ],
+            # Sensitivity warnings
+            'sensitivity_link': [
+                'a:contains("Some videos are not shown")',
+                '.sensitivity-warning a',
+                '.content-warning a'
+            ]
         }
         
         if config_file and Path(config_file).exists():
@@ -200,8 +302,15 @@ class VideoPageParser(BasePage):
             if canonical:
                 video.id = canonical.get('href', '').split('/')[-2]
             
-            # Extract basic video information
-            title_elem = self.find_element_safe('video_title')
+            # Extract basic video information - try multiple approaches for title
+            title_elem = self.soup.find(id='video-title')
+            if not title_elem:
+                # Try alternative selectors
+                title_elem = self.find_element_safe('video_title')
+            if not title_elem:
+                # Try h1 tag as fallback
+                title_elem = self.soup.find('h1')
+            
             if title_elem:
                 video.title = title_elem.get_text().strip()
             
@@ -213,11 +322,17 @@ class VideoPageParser(BasePage):
             # Extract like/dislike counts
             like_elem = self.soup.find(id='video-like-count')
             if like_elem:
-                video.like_count = int(like_elem.get_text().strip() or 0)
+                try:
+                    video.like_count = int(like_elem.get_text().strip() or 0)
+                except ValueError:
+                    video.like_count = 0
             
             dislike_elem = self.soup.find(id='video-dislike-count')
             if dislike_elem:
-                video.dislike_count = int(dislike_elem.get_text().strip() or 0)
+                try:
+                    video.dislike_count = int(dislike_elem.get_text().strip() or 0)
+                except ValueError:
+                    video.dislike_count = 0
             
             # Extract description
             desc_elem = self.find_element_safe('video_description')
@@ -270,44 +385,73 @@ class SearchPageParser(BasePage):
     
     def parse(self) -> List[VideoData]:
         videos = []
-        video_containers = self.find_elements_safe('video_cards')
+        
+        # Look for video cards with the new structure
+        video_containers = self.soup.select('.q-card')
         
         for i, container in enumerate(video_containers, 1):
             try:
                 video = VideoData()
                 video.rank = i
                 
-                # Extract title and ID
-                title_elem = self.find_element_safe('video_title', container)
-                if title_elem:
-                    video.title = title_elem.get_text().strip()
-                    href = title_elem.get('href', '')
+                # Extract video ID from the main video link
+                main_video_link = container.select_one('a[href*="/video/"]')
+                if main_video_link:
+                    href = main_video_link.get('href', '')
                     if href:
-                        video.id = href.split('/')[-2]
+                        # Extract video ID (e.g., "/video/dqoDDpLoQuL2" -> "dqoDDpLoQuL2")
+                        video.id = href.split('/')[-1]
                 
-                # Extract channel
-                channel_elem = self.find_element_safe('video_channel', container)
-                if channel_elem:
-                    video.channel_name = channel_elem.get_text().strip()
-                    video.channel_id = channel_elem.get('href', '').split('/')[-2]
+                # Extract TITLE, CREATOR, PUBLISHED AGO from the main content section
+                # Target specifically .q-item__section--main (Section 2 from debug)
+                main_section = container.select_one('.q-item__section--main')
+                if main_section:
+                    labels = main_section.select('.q-item__label')
+                    
+                    if len(labels) >= 1:
+                        # 1st .q-item__label = TITLE
+                        video.title = labels[0].get_text().strip()
+                    
+                    if len(labels) >= 2:
+                        # 2nd .q-item__label = CREATOR
+                        video.channel_name = labels[1].get_text().strip()
+                    
+                    if len(labels) >= 3:
+                        # 3rd .q-item__label = PUBLISHED AGO
+                        video.created_at = labels[2].get_text().strip()
                 
-                # Extract views
-                views_elem = self.find_element_safe('video_views', container)
+                # Extract channel ID from channel link
+                channel_link = container.select_one('a[href*="/channel/"]')
+                if channel_link:
+                    channel_href = channel_link.get('href', '')
+                    if channel_href:
+                        video.channel_id = channel_href.split('/')[-1]
+                
+                # Extract VIEWS from .absolute-bottom-left
+                views_elem = container.select_one('.absolute-bottom-left .text-caption')
                 if views_elem:
-                    video.view_count = self._process_views(views_elem.get_text())
+                    views_text = views_elem.get_text().strip()
+                    # Remove commas and parse number
+                    views_clean = views_text.replace(',', '')
+                    try:
+                        video.view_count = int(views_clean)
+                    except ValueError:
+                        video.view_count = 0
                 
-                # Extract duration
-                duration_elem = self.find_element_safe('video_duration', container)
+                # Extract DURATION from .absolute-bottom-right
+                duration_elem = container.select_one('.absolute-bottom-right .text-caption')
                 if duration_elem:
                     video.duration = duration_elem.get_text().strip()
                 
-                # Extract thumbnail
-                thumb_elem = self.find_element_safe('video_thumbnail', container)
-                if thumb_elem:
-                    video.thumbnail_url = thumb_elem.get('data-src') or thumb_elem.get('src', '')
+                # Extract thumbnail URL from the main image
+                thumbnail_elem = container.select_one('.q-img__image')
+                if thumbnail_elem:
+                    video.thumbnail_url = thumbnail_elem.get('src', '')
                 
-                videos.append(video)
-                
+                # Only add video if we have essential data
+                if video.id or video.title:
+                    videos.append(video)
+                    
             except Exception as e:
                 logger.warning(f"Failed to parse video container {i}: {e}")
                 continue
@@ -317,13 +461,33 @@ class SearchPageParser(BasePage):
     def _process_views(self, views_str: str) -> int:
         """Convert view count string to integer"""
         try:
-            # Remove common prefixes and clean the string
-            views = views_str.lower().replace('views', '').replace(',', '').strip()
-            if 'k' in views:
-                return int(float(views.replace('k', '')) * 1000)
-            elif 'm' in views:
-                return int(float(views.replace('m', '')) * 1000000)
+            # Clean the string and remove commas
+            views = views_str.replace(',', '').strip()
+            
+            # Handle K/M suffixes
+            if views.lower().endswith('k'):
+                return int(float(views[:-1]) * 1000)
+            elif views.lower().endswith('m'):
+                return int(float(views[:-1]) * 1000000)
             else:
+                # Try to parse as integer
+                return int(views)
+        except (ValueError, AttributeError):
+            return 0
+    
+    def _process_views(self, views_str: str) -> int:
+        """Convert view count string to integer"""
+        try:
+            # Clean the string and remove commas
+            views = views_str.replace(',', '').strip()
+            
+            # Handle K/M suffixes
+            if views.lower().endswith('k'):
+                return int(float(views[:-1]) * 1000)
+            elif views.lower().endswith('m'):
+                return int(float(views[:-1]) * 1000000)
+            else:
+                # Try to parse as integer
                 return int(views)
         except (ValueError, AttributeError):
             return 0
@@ -373,16 +537,30 @@ class EnhancedCrawler:
             'channel': 'https://www.bitchute.com/channel/{}/',
             'video': 'https://www.bitchute.com/video/{}/',
             'hashtag': 'https://www.bitchute.com/hashtag/{}/',
-            'search': 'https://www.bitchute.com/search/?query={}&kind=video'
+            'search': 'https://www.bitchute.com/search/?query={}&kind=video',
+            # Video listing pages
+            'trending': 'https://www.bitchute.com/trending/',
+            'trending_week': 'https://www.bitchute.com/trending/?period=week',
+            'trending_month': 'https://www.bitchute.com/trending/?period=month',
+            'popular': 'https://www.bitchute.com/popular/',  # "Fresh" on site
+            'all': 'https://www.bitchute.com/all/',
+            'member_picked': 'https://www.bitchute.com/memberpicked/',
+            'shorts': 'https://www.bitchute.com/shorts/'
         }
     
     def create_webdriver(self):
         """Create WebDriver with enhanced options"""
         try:
             if not self.chrome_driver:
-                self.wd = webdriver.Chrome(ChromeDriverManager().install(), options=self.options)
+                self.wd = webdriver.Chrome(
+                    service=webdriver.ChromeService(ChromeDriverManager().install()),
+                    options=self.options
+                )
             else:
-                self.wd = webdriver.Chrome(self.chrome_driver, options=self.options)
+                self.wd = webdriver.Chrome(
+                    service=webdriver.ChromeService(self.chrome_driver),
+                    options=self.options
+                )
             
             # Set implicit wait and page load timeout
             self.wd.implicitly_wait(10)
@@ -479,14 +657,12 @@ class EnhancedCrawler:
         
         # Handle sensitivity warning
         try:
-            sensitivity_selectors = self.selectors.get_selectors('sensitivity_link')
-            for selector in sensitivity_selectors:
-                elements = self.wd.find_elements(By.PARTIAL_LINK_TEXT, "Some videos are not shown")
-                for element in elements:
-                    if element.is_displayed():
-                        element.click()
-                        time.sleep(2)
-                        break
+            elements = self.wd.find_elements(By.PARTIAL_LINK_TEXT, "Some videos are not shown")
+            for element in elements:
+                if element.is_displayed():
+                    element.click()
+                    time.sleep(2)
+                    break
         except Exception as e:
             logger.debug(f"No sensitivity warning found: {e}")
     
@@ -624,43 +800,6 @@ class EnhancedCrawler:
         
         return df
     
-    async def _download_thumbnails_async(self, videos: List[VideoData]) -> List[VideoData]:
-        """Download thumbnails asynchronously for better performance"""
-        async def download_single(session: aiohttp.ClientSession, video: VideoData) -> VideoData:
-            if not video.thumbnail_url:
-                return video
-            
-            try:
-                url_hash = hashlib.md5(video.thumbnail_url.encode()).hexdigest()[:8]
-                extension = Path(urlparse(video.thumbnail_url).path).suffix or '.jpg'
-                filename = f"{video.id}_{url_hash}{extension}"
-                filepath = self.thumbnail_dir / filename
-                
-                if filepath.exists():
-                    video.thumbnail_local_path = str(filepath)
-                    return video
-                
-                async with session.get(video.thumbnail_url) as response:
-                    response.raise_for_status()
-                    content = await response.read()
-                    
-                    with open(filepath, 'wb') as f:
-                        f.write(content)
-                    
-                    video.thumbnail_local_path = str(filepath)
-                    logger.info(f"Downloaded thumbnail: {filename}")
-                    
-            except Exception as e:
-                logger.warning(f"Failed to download thumbnail for {video.id}: {e}")
-                video.thumbnail_local_path = video.thumbnail_url
-            
-            return video
-        
-        # Download thumbnails concurrently
-        async with aiohttp.ClientSession() as session:
-            tasks = [download_single(session, video) for video in videos]
-            return await asyncio.gather(*tasks)
-    
     def get_trending_videos(self, timeframe: str = 'day') -> pd.DataFrame:
         """Get trending videos with timeframe support"""
         try:
@@ -755,74 +894,6 @@ class EnhancedCrawler:
         except Exception as e:
             logger.error(f"Failed to get channel info for {channel_id}: {e}")
             return None
-        finally:
-            self.reset_webdriver()
-    
-    def get_channel_videos(self, channel_id: str, max_videos: Optional[int] = None) -> pd.DataFrame:
-        """Get videos from a specific channel"""
-        try:
-            url = self.url_patterns['channel'].format(channel_id)
-            page_source = self._fetch_page(url, click_elements=['VIDEOS'], max_items=max_videos)
-            
-            soup = BeautifulSoup(page_source, 'html.parser')
-            
-            videos = []
-            video_containers = soup.find_all(class_='channel-videos-container')
-            
-            for i, container in enumerate(video_containers, 1):
-                try:
-                    video = VideoData()
-                    video.channel_id = channel_id
-                    
-                    # Extract title and ID
-                    title_elem = container.find(class_='channel-videos-title')
-                    if title_elem and title_elem.find('a'):
-                        video.title = title_elem.get_text().strip()
-                        href = title_elem.find('a').get('href', '')
-                        video.id = href.split('/')[-2] if href else ''
-                    
-                    # Extract description
-                    desc_elem = container.find(class_='channel-videos-text')
-                    if desc_elem:
-                        video.description = markdownify.markdownify(desc_elem.decode_contents())
-                    
-                    # Extract duration
-                    duration_elem = container.find(class_='video-duration')
-                    if duration_elem:
-                        video.duration = duration_elem.get_text().strip()
-                    
-                    # Extract views
-                    views_elem = container.find(class_='video-views')
-                    if views_elem:
-                        views_text = views_elem.get_text().strip()
-                        video.view_count = self._process_views(views_text)
-                    
-                    # Extract creation date
-                    date_elem = container.find(class_='channel-videos-details')
-                    if date_elem:
-                        video.created_at = date_elem.get_text().strip()
-                    
-                    videos.append(video)
-                    
-                    if max_videos and len(videos) >= max_videos:
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to parse video container {i}: {e}")
-                    continue
-            
-            # Convert to DataFrame
-            data = [asdict(video) for video in videos]
-            df = pd.DataFrame(data)
-            
-            if self.download_thumbnails and not df.empty:
-                df = self._download_thumbnails_sync(df)
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"Failed to get videos for channel {channel_id}: {e}")
-            return pd.DataFrame()
         finally:
             self.reset_webdriver()
     
@@ -926,9 +997,37 @@ class Crawler(EnhancedCrawler):
     def __init__(self, headless=True, verbose=False, chrome_driver=None):
         super().__init__(headless=headless, verbose=verbose, chrome_driver=chrome_driver)
     
-    def get_trending_videos(self):
-        """Backward compatible trending videos method"""
-        return super().get_trending_videos('day')
+    def get_trending_videos(self, timeframe='day'):
+        """Backward compatible trending videos method with timeframe support"""
+        return super().get_trending_videos(timeframe)
+    
+    def get_trending_videos_week(self):
+        """Get trending videos for the week"""
+        return self.get_trending_videos('week')
+    
+    def get_trending_videos_month(self):
+        """Get trending videos for the month"""
+        return self.get_trending_videos('month')
+    
+    def get_popular_videos(self):
+        """Get popular/fresh videos (backward compatible)"""
+        return super().get_popular_videos()
+    
+    def get_fresh_videos(self):
+        """Alias for get_popular_videos (matches new UI naming)"""
+        return self.get_popular_videos()
+    
+    def get_all_videos(self):
+        """Get all videos (backward compatible)"""
+        return super().get_all_videos()
+    
+    def get_member_picked_videos(self):
+        """Get member picked videos"""
+        return super().get_member_picked_videos()
+    
+    def get_shorts_videos(self):
+        """Get shorts videos"""
+        return super().get_shorts_videos()
     
     def get_trending_tags(self):
         """Get trending tags (backward compatible)"""
@@ -1061,6 +1160,74 @@ class Crawler(EnhancedCrawler):
         
         return abouts, videos
     
+    def get_channel_videos(self, channel_id: str, max_videos: Optional[int] = None) -> pd.DataFrame:
+        """Get videos from a specific channel"""
+        try:
+            url = self.url_patterns['channel'].format(channel_id)
+            page_source = self._fetch_page(url, click_elements=['VIDEOS'], max_items=max_videos)
+            
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            videos = []
+            video_containers = soup.find_all(class_='channel-videos-container')
+            
+            for i, container in enumerate(video_containers, 1):
+                try:
+                    video = VideoData()
+                    video.channel_id = channel_id
+                    
+                    # Extract title and ID
+                    title_elem = container.find(class_='channel-videos-title')
+                    if title_elem and title_elem.find('a'):
+                        video.title = title_elem.get_text().strip()
+                        href = title_elem.find('a').get('href', '')
+                        video.id = href.split('/')[-2] if href else ''
+                    
+                    # Extract description
+                    desc_elem = container.find(class_='channel-videos-text')
+                    if desc_elem:
+                        video.description = markdownify.markdownify(desc_elem.decode_contents())
+                    
+                    # Extract duration
+                    duration_elem = container.find(class_='video-duration')
+                    if duration_elem:
+                        video.duration = duration_elem.get_text().strip()
+                    
+                    # Extract views
+                    views_elem = container.find(class_='video-views')
+                    if views_elem:
+                        views_text = views_elem.get_text().strip()
+                        video.view_count = self._process_views(views_text)
+                    
+                    # Extract creation date
+                    date_elem = container.find(class_='channel-videos-details')
+                    if date_elem:
+                        video.created_at = date_elem.get_text().strip()
+                    
+                    videos.append(video)
+                    
+                    if max_videos and len(videos) >= max_videos:
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to parse video container {i}: {e}")
+                    continue
+            
+            # Convert to DataFrame
+            data = [asdict(video) for video in videos]
+            df = pd.DataFrame(data)
+            
+            if self.download_thumbnails and not df.empty:
+                df = self._download_thumbnails_sync(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get videos for channel {channel_id}: {e}")
+            return pd.DataFrame()
+        finally:
+            self.reset_webdriver()
+    
     def get_videos(self, video_ids):
         """Get video information (backward compatible)"""
         if isinstance(video_ids, str):
@@ -1078,3 +1245,10 @@ class Crawler(EnhancedCrawler):
                 continue
         
         return pd.DataFrame(videos)
+
+
+# Original function-style interface for backward compatibility
+def process_views(views):
+    """Legacy function for processing view counts"""
+    crawler = Crawler()
+    return crawler._process_views(str(views))
