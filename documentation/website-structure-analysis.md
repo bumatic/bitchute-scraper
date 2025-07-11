@@ -1,6 +1,7 @@
 # Bitcute 
 
-## Homepage
+
+## 2022 Homepage Structure
 
 The Bitchute homepage contains video listings of popular, trending and all videos as well as a carousel of recommended channels. The trending homepage also contains trending tags.
 
