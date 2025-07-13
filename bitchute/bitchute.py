@@ -37,6 +37,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
 from retrying import retry
 
+import requests
+import json
+from typing import Dict, Any, Optional
+
 # Configure base logging
 logger = logging.getLogger(__name__)
 
@@ -501,7 +505,7 @@ class Crawler:
         return enhanced_videos
     
     def _get_detailed_video_data(self, video: VideoData) -> VideoData:
-        """Get detailed data for a single video by visiting its page - FIXED VERSION"""
+        """Get detailed data for a single video by visiting its page - UPDATED VERSION"""
         if not video.id:
             return video
         
@@ -511,26 +515,45 @@ class Crawler:
             if self.verbose:
                 logger.debug(f'Fetching video page: {video_url}')
             
+            # Ensure we have a webdriver instance
+            if not self.wd:
+                if self.verbose:
+                    logger.debug("Creating WebDriver instance for video page access...")
+                self.create_webdriver()
+                if not self.wd:
+                    raise Exception("Failed to create WebDriver instance")
+            
             # Navigate to video page
             self.wd.get(video_url)
             
-            # ENHANCED WAITING: Wait for multiple key elements to ensure page is fully loaded
-            wait = WebDriverWait(self.wd, 15)  # Increased timeout
+            # Wait for page to load with updated selectors
+            wait = WebDriverWait(self.wd, 15)
             
             try:
-                # Wait for the video title to be present (key indicator page loaded)
-                wait.until(EC.presence_of_element_located((By.ID, "video-title")))
+                # Wait for the main content area to load
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".bc-text-break, .q-item__label")))
                 
-                # Also wait for the video statistics section
-                wait.until(EC.presence_of_element_located((By.CLASS_NAME, "video-statistics")))
+                # Give extra time for dynamic content and "Show more" functionality
+                time.sleep(3)
                 
-                # Wait a bit more for any dynamic content to load
-                time.sleep(2)
+                # Try to click "Show more" button if present to expand description
+                try:
+                    show_more_buttons = self.wd.find_elements(By.XPATH, "//div[contains(text(), 'Show more')]")
+                    for button in show_more_buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            self.wd.execute_script("arguments[0].click();", button)
+                            time.sleep(1)  # Wait for content to expand
+                            if self.verbose:
+                                logger.debug("Clicked 'Show more' button to expand description")
+                            break
+                except Exception as e:
+                    if self.verbose:
+                        logger.debug(f"No 'Show more' button found or couldn't click: {e}")
                 
             except TimeoutException:
                 if self.verbose:
-                    logger.warning(f"Timeout waiting for video page elements to load: {video_url}")
-                # Try to continue anyway, might still get some data
+                    logger.warning(f"Timeout waiting for page elements to load: {video_url}")
+                # Continue anyway
             
             # Additional check: ensure we're on the right page
             current_url = self.wd.current_url
@@ -539,16 +562,16 @@ class Crawler:
                     logger.warning(f"URL mismatch. Expected {video.id}, got {current_url}")
                 return video
             
-            # Get page source after ensuring it's loaded
-            soup = BeautifulSoup(self.wd.page_source, 'html.parser')
-            
-            # Verify we have the expected content
-            if not soup.find(id='video-title'):
+            # Get page source after ensuring it's loaded and expanded
+            page_source = self.wd.page_source
+            if not page_source:
                 if self.verbose:
-                    logger.warning(f"Video title not found on page, page may not be fully loaded: {video_url}")
+                    logger.warning(f"No page source retrieved for {video_url}")
                 return video
             
-            # Extract detailed information
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            # Use the updated parsing method
             enhanced_video = self._parse_video_page(soup, video)
             
             return enhanced_video
@@ -557,167 +580,279 @@ class Crawler:
             if self.verbose:
                 logger.warning(f"Failed to get detailed data for video {video.id}: {e}")
             return video
+
     
     def _parse_video_page(self, soup: BeautifulSoup, base_video: VideoData) -> VideoData:
-        """Parse detailed video information from video page - IMPROVED VERSION"""
+        """Parse detailed video information from video page - UPDATED FOR CURRENT BITCHUTE"""
         video = base_video  # Start with existing data
         
         try:
-            # DEBUGGING: Log what elements we find
             if self.verbose:
-                title_elem = soup.find(id='video-title')
-                views_elem = soup.find(id='video-view-count')
-                desc_elem = soup.find(id='video-description')
-                logger.debug(f"Page parsing - Title: {'✓' if title_elem else '✗'}, "
-                            f"Views: {'✓' if views_elem else '✗'}, "
-                            f"Description: {'✓' if desc_elem else '✗'}")
+                logger.debug(f"Parsing video page for {video.id}")
             
-            # Extract title (if not already set or if different)
-            title_elem = soup.find(id='video-title')
+            # 1. Extract title from the responsive font element
+            title_elem = soup.select_one('.bc-text-break.bc-responsive-font')
             if title_elem:
-                page_title = title_elem.get_text().strip()
-                if page_title and (not video.title or len(page_title) > len(video.title)):
-                    video.title = page_title
-                    if self.verbose:
-                        logger.debug(f"Updated title: {page_title}")
-            
-            # Extract view count (more accurate from video page)
-            views_elem = soup.find(id='video-view-count')
-            if views_elem:
-                views_text = views_elem.get_text().strip()
-                if views_text and views_text != "":
-                    new_view_count = self._parse_view_count(views_text)
-                    if new_view_count > 0:  # Only update if we got a valid count
-                        video.view_count = new_view_count
-                        if self.verbose:
-                            logger.debug(f"Updated view count: {new_view_count}")
-            
-            # Extract like/dislike counts with better error handling
-            like_elem = soup.find(id='video-like-count')
-            if like_elem:
                 try:
-                    like_text = like_elem.get_text().strip()
-                    if like_text and like_text.replace(',', '').isdigit():
-                        video.like_count = int(like_text.replace(',', ''))
+                    page_title = title_elem.get_text().strip()
+                    if page_title:
+                        video.title = page_title
                         if self.verbose:
-                            logger.debug(f"Like count: {video.like_count}")
-                except (ValueError, AttributeError):
-                    pass
-            
-            dislike_elem = soup.find(id='video-dislike-count')
-            if dislike_elem:
-                try:
-                    dislike_text = dislike_elem.get_text().strip()
-                    if dislike_text and dislike_text.replace(',', '').isdigit():
-                        video.dislike_count = int(dislike_text.replace(',', ''))
-                        if self.verbose:
-                            logger.debug(f"Dislike count: {video.dislike_count}")
-                except (ValueError, AttributeError):
-                    pass
-            
-            # Extract description with better handling
-            desc_elem = soup.find(id='video-description')
-            if desc_elem:
-                try:
-                    # Get the description content
-                    desc_content = desc_elem.decode_contents()
-                    if desc_content and desc_content.strip():
-                        # Convert HTML to markdown for better readability
-                        video.description = markdownify.markdownify(desc_content).strip()
-                        
-                        # Extract links from description
-                        links = []
-                        for a in desc_elem.find_all('a'):
-                            href = a.get('href')
-                            if href and href.startswith('http'):
-                                links.append(href)
-                        video.description_links = links
-                        
-                        if self.verbose:
-                            logger.debug(f"Description length: {len(video.description)} chars, Links: {len(links)}")
+                            logger.debug(f"Extracted title: {page_title}")
                 except Exception as e:
                     if self.verbose:
-                        logger.debug(f"Error parsing description: {e}")
+                        logger.debug(f"Error extracting title: {e}")
             
-            # Extract hashtags with better handling
-            hashtag_elem = soup.find(id='video-hashtags')
-            if hashtag_elem:
+            # 2. Extract view count and publish time from subtitle element
+            view_time_elem = soup.select_one('.q-item__label.text-subtitle1')
+            if view_time_elem:
                 try:
-                    hashtags = []
-                    for li in hashtag_elem.find_all('li'):
-                        tag_text = li.get_text().strip()
-                        if tag_text:
-                            hashtags.append(tag_text)
-                    if hashtags:
-                        video.hashtags = hashtags
-                        if self.verbose:
-                            logger.debug(f"Hashtags: {hashtags}")
-                except Exception as e:
+                    view_time_text = view_time_elem.get_text().strip()
                     if self.verbose:
-                        logger.debug(f"Error parsing hashtags: {e}")
-            
-            # Extract category and sensitivity from the details table
-            detail_table = soup.find('table', class_='video-detail-list')
-            if detail_table:
-                try:
-                    for row in detail_table.find_all('tr'):
-                        cells = row.find_all('td')
-                        if len(cells) >= 2:
-                            label = cells[0].get_text().strip().lower()
-                            value = cells[1].get_text().strip()
+                        logger.debug(f"View/time text: {view_time_text}")
+                    
+                    # Extract view count (pattern: "2466 Views -")
+                    import re
+                    view_match = re.search(r'(\d+(?:,\d+)*)\s*Views', view_time_text)
+                    if view_match:
+                        view_count_str = view_match.group(1).replace(',', '')
+                        video.view_count = int(view_count_str)
+                        if self.verbose:
+                            logger.debug(f"Extracted view count: {video.view_count}")
+                    
+                    # Extract publish time (pattern: "11 hours ago")
+                    time_match = re.search(r'(\d+\s+(?:hours?|days?|weeks?|months?|years?)\s+ago)', view_time_text)
+                    if time_match:
+                        video.created_at = time_match.group(1)
+                        if self.verbose:
+                            logger.debug(f"Extracted publish time: {video.created_at}")
                             
-                            if 'category' in label and value:
-                                video.category = value
-                                if self.verbose:
-                                    logger.debug(f"Category: {value}")
-                            elif 'sensitivity' in label and value:
-                                video.sensitivity = value
-                                if self.verbose:
-                                    logger.debug(f"Sensitivity: {value}")
                 except Exception as e:
                     if self.verbose:
-                        logger.debug(f"Error parsing details table: {e}")
+                        logger.debug(f"Error extracting view/time data: {e}")
             
-            # Extract better thumbnail URL
-            video_player = soup.find('video', id='player')
-            if video_player and video_player.get('poster'):
-                poster_url = video_player.get('poster')
-                if poster_url and poster_url.startswith('http'):
-                    video.thumbnail_url = poster_url
-                    if self.verbose:
-                        logger.debug(f"Updated thumbnail URL")
-            
-            # Extract better channel information
-            channel_banner = soup.find(class_='channel-banner')
-            if channel_banner:
+            # 3. Extract channel information
+            channel_link = soup.select_one('a[href*="/channel/"]')
+            if channel_link:
                 try:
-                    # Channel name
-                    channel_name_elem = channel_banner.find(class_='name')
+                    # Extract channel ID from URL
+                    channel_href = channel_link.get('href', '')
+                    if channel_href:
+                        # Pattern: /channel/kCBxN1oEVOa0
+                        channel_id = channel_href.split('/channel/')[-1].rstrip('/')
+                        if channel_id:
+                            video.channel_id = channel_id
+                            if self.verbose:
+                                logger.debug(f"Extracted channel ID: {channel_id}")
+                    
+                    # Extract channel name from the ellipsis text-subtitle1 element within channel link
+                    channel_name_elem = channel_link.select_one('.q-item__label.ellipsis.text-subtitle1')
                     if channel_name_elem:
-                        name_link = channel_name_elem.find('a')
-                        if name_link:
-                            if not video.channel_name:  # Only update if not already set
-                                video.channel_name = name_link.get_text().strip()
-                            if not video.channel_id:  # Extract channel ID
-                                href = name_link.get('href', '')
-                                if href:
-                                    video.channel_id = href.split('/')[-2]
+                        channel_name = channel_name_elem.get_text().strip()
+                        if channel_name:
+                            video.channel_name = channel_name
+                            if self.verbose:
+                                logger.debug(f"Extracted channel name: {channel_name}")
+                                
                 except Exception as e:
                     if self.verbose:
-                        logger.debug(f"Error parsing channel info: {e}")
+                        logger.debug(f"Error extracting channel info: {e}")
             
-            # Extract publish date
-            publish_elem = soup.find(class_='video-publish-date')
-            if publish_elem and not video.created_at:
+            # 4. Extract subscriber count
+            subscriber_elem = soup.select_one('.q-item__label--caption')
+            if subscriber_elem:
                 try:
-                    publish_text = publish_elem.get_text().strip()
-                    if publish_text:
-                        video.created_at = publish_text
-                        if self.verbose:
-                            logger.debug(f"Publish date: {publish_text}")
+                    subscriber_text = subscriber_elem.get_text().strip()
+                    # Pattern: "22.1K Subscribers"
+                    if 'subscribers' in subscriber_text.lower():
+                        # Extract the number part for potential processing
+                        import re
+                        sub_match = re.search(r'([\d.]+[KMB]?)\s*Subscribers', subscriber_text, re.IGNORECASE)
+                        if sub_match:
+                            # Store as string to preserve formatting (22.1K)
+                            video.channel_name += f" ({sub_match.group(1)} subscribers)"
+                            if self.verbose:
+                                logger.debug(f"Extracted subscriber info: {sub_match.group(1)}")
                 except Exception as e:
                     if self.verbose:
-                        logger.debug(f"Error parsing publish date: {e}")
+                        logger.debug(f"Error extracting subscriber count: {e}")
+            
+            # 5. Extract like and dislike counts
+            try:
+                # Like button with thumb_up icon
+                like_button = soup.select_one('button:has(i[aria-label="thumb_up"], i:contains("thumb_up"))')
+                if not like_button:
+                    # Alternative: look for button containing thumb_up text
+                    like_buttons = soup.select('button')
+                    for btn in like_buttons:
+                        if 'thumb_up' in str(btn) and 'text-green' in btn.get('class', []):
+                            like_button = btn
+                            break
+                
+                if like_button:
+                    like_span = like_button.select_one('span.block')
+                    if like_span:
+                        like_text = like_span.get_text().strip()
+                        if like_text.isdigit():
+                            video.like_count = int(like_text)
+                            if self.verbose:
+                                logger.debug(f"Extracted like count: {video.like_count}")
+                
+                # Dislike button with thumb_down icon
+                dislike_button = soup.select_one('button:has(i[aria-label="thumb_down"], i:contains("thumb_down"))')
+                if not dislike_button:
+                    # Alternative: look for button containing thumb_down text
+                    dislike_buttons = soup.select('button')
+                    for btn in dislike_buttons:
+                        if 'thumb_down' in str(btn) and 'text-red' in btn.get('class', []):
+                            dislike_button = btn
+                            break
+                
+                if dislike_button:
+                    dislike_span = dislike_button.select_one('span.block')
+                    if dislike_span:
+                        dislike_text = dislike_span.get_text().strip()
+                        if dislike_text.isdigit():
+                            video.dislike_count = int(dislike_text)
+                            if self.verbose:
+                                logger.debug(f"Extracted dislike count: {video.dislike_count}")
+                                
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting like/dislike counts: {e}")
+            
+            # 6. Extract sensitivity information
+            try:
+                sensitivity_elem = soup.select_one('.q-item__label.text-subtitle1:contains("Sensitivity")')
+                if not sensitivity_elem:
+                    # Look for any element containing "Sensitivity -"
+                    for elem in soup.select('.q-item__label'):
+                        if 'sensitivity' in elem.get_text().lower():
+                            sensitivity_elem = elem
+                            break
+                
+                if sensitivity_elem:
+                    sensitivity_text = sensitivity_elem.get_text().strip()
+                    # Pattern: "Sensitivity - Normal (BBFC 12)"
+                    if 'sensitivity' in sensitivity_text.lower():
+                        # Extract everything after "Sensitivity -"
+                        parts = sensitivity_text.split(' - ', 1)
+                        if len(parts) > 1:
+                            video.sensitivity = parts[1].strip()
+                            if self.verbose:
+                                logger.debug(f"Extracted sensitivity: {video.sensitivity}")
+                                
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting sensitivity: {e}")
+            
+            # 7. Extract description from bc-description element
+            try:
+                desc_elem = soup.select_one('.bc-description')
+                if desc_elem:
+                    # Get all text content
+                    desc_text = desc_elem.get_text().strip()
+                    if desc_text:
+                        video.description = desc_text
+                        if self.verbose:
+                            logger.debug(f"Extracted description: {len(desc_text)} characters")
+                    
+                    # Extract links from description
+                    links = []
+                    for link in desc_elem.select('a[href]'):
+                        href = link.get('href')
+                        if href and href.startswith('http'):
+                            links.append(href)
+                    
+                    if links:
+                        video.description_links = links
+                        if self.verbose:
+                            logger.debug(f"Extracted {len(links)} description links")
+                            
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting description: {e}")
+            
+            # 8. Extract hashtags (if present)
+            try:
+                # Look for hashtag links in the area after view count
+                hashtag_area = soup.select('a[href*="/hashtag/"]')
+                hashtags = []
+                
+                for hashtag_link in hashtag_area:
+                    try:
+                        # Extract hashtag content
+                        hashtag_content = hashtag_link.select_one('.q-chip__content')
+                        if hashtag_content:
+                            hashtag_text = hashtag_content.get_text().strip()
+                            if hashtag_text:
+                                hashtags.append(f"#{hashtag_text}")
+                    except Exception:
+                        continue
+                
+                if hashtags:
+                    video.hashtags = hashtags
+                    if self.verbose:
+                        logger.debug(f"Extracted hashtags: {hashtags}")
+                        
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting hashtags: {e}")
+            
+            # 9. Extract thumbnail from video iframe or meta tags
+            try:
+                # Try iframe first
+                iframe = soup.select_one('iframe[src*="embed"]')
+                if iframe:
+                    iframe_src = iframe.get('src', '')
+                    if iframe_src and 'embed' in iframe_src:
+                        # Try to construct thumbnail URL from embed URL
+                        # Pattern: https://www.bitchute.com/api/beta9/embed/6OJw7KjHQ27o
+                        video_id_match = re.search(r'/embed/([^/?]+)', iframe_src)
+                        if video_id_match:
+                            extracted_video_id = video_id_match.group(1)
+                            # Update video ID if not already set
+                            if not video.id:
+                                video.id = extracted_video_id
+                            # Construct thumbnail URL (common pattern for video thumbnails)
+                            video.thumbnail_url = f"https://static-3.bitchute.com/live/cover_images/{extracted_video_id[:12]}/{extracted_video_id}_640x360.jpg"
+                            if self.verbose:
+                                logger.debug(f"Constructed thumbnail URL from iframe")
+                
+                # Fallback to meta og:image
+                if not video.thumbnail_url:
+                    meta_image = soup.select_one('meta[property="og:image"]')
+                    if meta_image:
+                        thumbnail_url = meta_image.get('content', '')
+                        if thumbnail_url and thumbnail_url.startswith('http'):
+                            video.thumbnail_url = thumbnail_url
+                            if self.verbose:
+                                logger.debug(f"Extracted thumbnail from meta tag")
+                                
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting thumbnail: {e}")
+            
+            # 10. Extract video duration from iframe or other sources
+            try:
+                iframe = soup.select_one('iframe[src*="embed"]')
+                if iframe:
+                    iframe_src = iframe.get('src', '')
+                    # Look for duration parameter in iframe src
+                    duration_match = re.search(r'duration=([^&]+)', iframe_src)
+                    if duration_match:
+                        video.duration = duration_match.group(1)
+                        if self.verbose:
+                            logger.debug(f"Extracted duration: {video.duration}")
+                            
+            except Exception as e:
+                if self.verbose:
+                    logger.debug(f"Error extracting duration: {e}")
+            
+            if self.verbose:
+                logger.debug(f"Video parsing complete for {video.id}")
+                logger.debug(f"Final data - Title: {bool(video.title)}, Views: {video.view_count}, "
+                            f"Likes: {video.like_count}, Description: {len(video.description) if video.description else 0} chars")
             
             return video
             
@@ -1327,22 +1462,32 @@ class Crawler:
             self.reset_webdriver()
     
     def debug_single_video_enhancement(self, video_id: str) -> dict:
-        """Debug method to test enhanced data collection on a single video"""
+        """Debug method to test enhanced data collection on a single video - FIXED VERSION"""
         
         print(f"🔍 Debugging enhanced collection for video: {video_id}")
         print("="*60)
         
         try:
+            # CRITICAL FIX: Ensure WebDriver is created before any operations
+            if not self.wd:
+                print("1. Creating WebDriver instance...")
+                self.create_webdriver()
+                if not self.wd:
+                    return {'success': False, 'error': 'Failed to create WebDriver'}
+                print("   ✓ WebDriver created successfully")
+            else:
+                print("1. Using existing WebDriver instance...")
+            
             # Create a basic VideoData object
             basic_video = VideoData()
             basic_video.id = video_id
             basic_video.title = "Test Video"
             
             # Test the enhancement process
-            print("1. Navigating to video page...")
+            print("2. Navigating to video page...")
             enhanced_video = self._get_detailed_video_data(basic_video)
             
-            print("2. Checking what data was collected:")
+            print("3. Checking what data was collected:")
             print(f"   Title: {'✓' if enhanced_video.title else '✗'} {enhanced_video.title[:50]}...")
             print(f"   Description: {'✓' if enhanced_video.description else '✗'} ({len(enhanced_video.description)} chars)")
             print(f"   View count: {'✓' if enhanced_video.view_count > 0 else '✗'} {enhanced_video.view_count:,}")
@@ -1363,8 +1508,407 @@ class Crawler:
             print(f"❌ Error: {e}")
             return {'success': False, 'error': str(e)}
         finally:
+            # Clean up WebDriver
             self.reset_webdriver()
 
+    def diagnose_video_page_html(self, video_id: str) -> dict:
+        """Diagnostic method to capture and analyze the current HTML structure"""
+        
+        print(f"🔍 Analyzing HTML structure for video: {video_id}")
+        print("="*60)
+        
+        try:
+            # Ensure WebDriver is created
+            if not self.wd:
+                self.create_webdriver()
+                if not self.wd:
+                    return {'success': False, 'error': 'Failed to create WebDriver'}
+            
+            video_url = f"{self.base_url}video/{video_id}/"
+            print(f"Navigating to: {video_url}")
+            
+            # Navigate to video page
+            self.wd.get(video_url)
+            time.sleep(5)  # Give page time to fully load
+            
+            # Get page source
+            page_source = self.wd.page_source
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            # Collect diagnostic information
+            diagnostic_info = {
+                'success': True,
+                'current_url': self.wd.current_url,
+                'page_title': soup.find('title').get_text() if soup.find('title') else 'No title',
+                'page_source_length': len(page_source)
+            }
+            
+            print(f"Current URL: {diagnostic_info['current_url']}")
+            print(f"Page title: {diagnostic_info['page_title']}")
+            print(f"Page source length: {diagnostic_info['page_source_length']} characters")
+            
+            # Look for video title in various possible locations
+            print("\n📍 Searching for video title...")
+            title_selectors = [
+                {'name': 'ID: video-title', 'selector': '#video-title'},
+                {'name': 'Class: page-title', 'selector': '.page-title'},
+                {'name': 'H1 tags', 'selector': 'h1'},
+                {'name': 'Title in metadata', 'selector': 'meta[property="og:title"]'},
+                {'name': 'Any element with "title" class', 'selector': '.title'},
+            ]
+            
+            for selector_info in title_selectors:
+                elements = soup.select(selector_info['selector'])
+                if elements:
+                    for i, elem in enumerate(elements[:3]):  # Show first 3 matches
+                        if selector_info['selector'].startswith('meta'):
+                            content = elem.get('content', 'No content')
+                        else:
+                            content = elem.get_text().strip()
+                        print(f"   ✓ {selector_info['name']} [{i+1}]: {content[:100]}...")
+                else:
+                    print(f"   ✗ {selector_info['name']}: Not found")
+            
+            # Look for view count in various locations
+            print("\n📍 Searching for view count...")
+            view_selectors = [
+                {'name': 'ID: video-view-count', 'selector': '#video-view-count'},
+                {'name': 'Class: video-statistics', 'selector': '.video-statistics'},
+                {'name': 'Text containing "views"', 'selector': None},  # Special case
+                {'name': 'Any stats section', 'selector': '.stats, .statistics, .view-count'},
+            ]
+            
+            for selector_info in view_selectors:
+                if selector_info['selector']:
+                    elements = soup.select(selector_info['selector'])
+                    if elements:
+                        for i, elem in enumerate(elements[:2]):
+                            content = elem.get_text().strip()
+                            print(f"   ✓ {selector_info['name']} [{i+1}]: {content[:100]}...")
+                    else:
+                        print(f"   ✗ {selector_info['name']}: Not found")
+                else:
+                    # Special case: search for text containing "views"
+                    view_text_elements = soup.find_all(text=lambda text: text and 'view' in text.lower())
+                    if view_text_elements:
+                        for i, text in enumerate(view_text_elements[:3]):
+                            print(f"   ✓ {selector_info['name']} [{i+1}]: {text.strip()[:100]}...")
+                    else:
+                        print(f"   ✗ {selector_info['name']}: Not found")
+            
+            # Look for description
+            print("\n📍 Searching for description...")
+            desc_selectors = [
+                {'name': 'ID: video-description', 'selector': '#video-description'},
+                {'name': 'Class: video-detail-text', 'selector': '.video-detail-text'},
+                {'name': 'Class: description', 'selector': '.description'},
+                {'name': 'Meta description', 'selector': 'meta[name="description"]'},
+            ]
+            
+            for selector_info in desc_selectors:
+                if selector_info['selector'].startswith('meta'):
+                    elements = soup.select(selector_info['selector'])
+                    if elements:
+                        content = elements[0].get('content', 'No content')
+                        print(f"   ✓ {selector_info['name']}: {content[:100]}...")
+                    else:
+                        print(f"   ✗ {selector_info['name']}: Not found")
+                else:
+                    elements = soup.select(selector_info['selector'])
+                    if elements:
+                        content = elements[0].get_text().strip()
+                        print(f"   ✓ {selector_info['name']}: {content[:100]}...")
+                    else:
+                        print(f"   ✗ {selector_info['name']}: Not found")
+            
+            # Look for like/dislike counts
+            print("\n📍 Searching for like/dislike counts...")
+            like_selectors = [
+                {'name': 'ID: video-like-count', 'selector': '#video-like-count'},
+                {'name': 'ID: video-dislike-count', 'selector': '#video-dislike-count'},
+                {'name': 'Classes with "like"', 'selector': '.like, .thumbs-up'},
+                {'name': 'Classes with "dislike"', 'selector': '.dislike, .thumbs-down'},
+            ]
+            
+            for selector_info in like_selectors:
+                elements = soup.select(selector_info['selector'])
+                if elements:
+                    for i, elem in enumerate(elements[:2]):
+                        content = elem.get_text().strip()
+                        print(f"   ✓ {selector_info['name']} [{i+1}]: {content[:50]}...")
+                else:
+                    print(f"   ✗ {selector_info['name']}: Not found")
+            
+            # Save a snippet of the HTML around key areas for manual inspection
+            print("\n📍 HTML snippets for manual inspection...")
+            
+            # Try to find the main content area
+            main_content = soup.find('main') or soup.find('body')
+            if main_content:
+                # Save the first 2000 characters of the main content
+                main_html = str(main_content)[:2000]
+                diagnostic_info['main_content_snippet'] = main_html
+                print(f"   Main content snippet saved ({len(main_html)} chars)")
+            
+            # Look for any obvious video-related sections
+            video_sections = soup.find_all(['div', 'section'], class_=lambda x: x and any(
+                keyword in x.lower() for keyword in ['video', 'player', 'content', 'main']
+            ))
+            
+            if video_sections:
+                print(f"   Found {len(video_sections)} potential video-related sections")
+                diagnostic_info['video_sections_found'] = len(video_sections)
+            
+            return diagnostic_info
+            
+        except Exception as e:
+            print(f"❌ Diagnostic failed: {e}")
+            return {'success': False, 'error': str(e)}
+        finally:
+            self.reset_webdriver()
+
+    def _get_video_data_via_api(self, video_id: str) -> Optional[Dict[Any, Any]]:
+        """Get video data directly from BitChute's API endpoint"""
+        
+        api_url = "https://api.bitchute.com/api/beta9/video"
+        
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'en-US,en;q=0.9',
+            'content-type': 'application/json',
+            'origin': 'https://www.bitchute.com',
+            'referer': 'https://www.bitchute.com/',
+            'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+        }
+        
+        payload = {"video_id": video_id}
+        
+        try:
+            if self.verbose:
+                logger.debug(f"Making API request for video {video_id}")
+            
+            response = requests.post(
+                api_url, 
+                headers=headers, 
+                json=payload,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                api_data = response.json()
+                if self.verbose:
+                    logger.debug(f"API response received: {len(str(api_data))} characters")
+                return api_data
+            else:
+                if self.verbose:
+                    logger.warning(f"API request failed with status {response.status_code}")
+                return None
+                
+        except requests.RequestException as e:
+            if self.verbose:
+                logger.warning(f"API request exception: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            if self.verbose:
+                logger.warning(f"API response JSON decode error: {e}")
+            return None
+
+    def _parse_api_response(self, api_data: Dict[Any, Any], base_video: VideoData) -> VideoData:
+        """Parse video data from API response into VideoData object"""
+        
+        video = base_video
+        
+        try:
+            if self.verbose:
+                logger.debug(f"Parsing API response for video {video.id}")
+                logger.debug(f"API data keys: {list(api_data.keys()) if api_data else 'None'}")
+            
+            if not api_data:
+                return video
+            
+            # Map API fields to VideoData fields
+            # Note: We'll need to discover the actual field names from the API response
+            
+            # Title
+            if 'title' in api_data:
+                video.title = api_data['title']
+            elif 'name' in api_data:
+                video.title = api_data['name']
+            
+            # View count
+            if 'view_count' in api_data:
+                video.view_count = int(api_data['view_count']) if api_data['view_count'] else 0
+            elif 'views' in api_data:
+                video.view_count = int(api_data['views']) if api_data['views'] else 0
+            
+            # Like/Dislike counts
+            if 'like_count' in api_data:
+                video.like_count = int(api_data['like_count']) if api_data['like_count'] else 0
+            elif 'likes' in api_data:
+                video.like_count = int(api_data['likes']) if api_data['likes'] else 0
+                
+            if 'dislike_count' in api_data:
+                video.dislike_count = int(api_data['dislike_count']) if api_data['dislike_count'] else 0
+            elif 'dislikes' in api_data:
+                video.dislike_count = int(api_data['dislikes']) if api_data['dislikes'] else 0
+            
+            # Description
+            if 'description' in api_data:
+                video.description = api_data['description'] or ""
+            
+            # Duration
+            if 'duration' in api_data:
+                video.duration = api_data['duration'] or ""
+            elif 'length' in api_data:
+                video.duration = api_data['length'] or ""
+            
+            # Channel information
+            if 'channel' in api_data:
+                channel_data = api_data['channel']
+                if isinstance(channel_data, dict):
+                    video.channel_name = channel_data.get('name', video.channel_name)
+                    video.channel_id = channel_data.get('id', video.channel_id)
+            elif 'uploader' in api_data:
+                uploader_data = api_data['uploader']
+                if isinstance(uploader_data, dict):
+                    video.channel_name = uploader_data.get('name', video.channel_name)
+                    video.channel_id = uploader_data.get('id', video.channel_id)
+            
+            # Thumbnail
+            if 'thumbnail' in api_data:
+                video.thumbnail_url = api_data['thumbnail'] or ""
+            elif 'poster' in api_data:
+                video.thumbnail_url = api_data['poster'] or ""
+            elif 'image' in api_data:
+                video.thumbnail_url = api_data['image'] or ""
+            
+            # Created date
+            if 'created_at' in api_data:
+                video.created_at = api_data['created_at'] or ""
+            elif 'upload_date' in api_data:
+                video.created_at = api_data['upload_date'] or ""
+            elif 'published' in api_data:
+                video.created_at = api_data['published'] or ""
+            
+            # Hashtags
+            if 'hashtags' in api_data:
+                hashtags = api_data['hashtags']
+                if isinstance(hashtags, list):
+                    video.hashtags = [f"#{tag}" if not tag.startswith('#') else tag for tag in hashtags]
+            elif 'tags' in api_data:
+                tags = api_data['tags']
+                if isinstance(tags, list):
+                    video.hashtags = [f"#{tag}" if not tag.startswith('#') else tag for tag in tags]
+            
+            # Category
+            if 'category' in api_data:
+                video.category = api_data['category'] or ""
+            
+            # Sensitivity
+            if 'sensitivity' in api_data:
+                video.sensitivity = api_data['sensitivity'] or ""
+            elif 'rating' in api_data:
+                video.sensitivity = api_data['rating'] or ""
+            
+            if self.verbose:
+                logger.debug(f"API parsing complete for {video.id}")
+            
+            return video
+            
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"Error parsing API response for {video.id}: {e}")
+            return video
+
+    def _get_detailed_video_data_api(self, video: VideoData) -> VideoData:
+        """Get detailed video data using API instead of HTML parsing"""
+        
+        if not video.id:
+            return video
+        
+        try:
+            if self.verbose:
+                logger.debug(f"Fetching video data via API for {video.id}")
+            
+            # Get data from API
+            api_data = self._get_video_data_via_api(video.id)
+            
+            if api_data:
+                # Parse API response
+                enhanced_video = self._parse_api_response(api_data, video)
+                return enhanced_video
+            else:
+                if self.verbose:
+                    logger.warning(f"No API data received for {video.id}, falling back to HTML parsing")
+                # Fallback to HTML parsing if API fails
+                return self._get_detailed_video_data_html_fallback(video)
+                
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"API method failed for {video.id}: {e}, falling back to HTML parsing")
+            # Fallback to HTML parsing if API method fails completely
+            return self._get_detailed_video_data_html_fallback(video)
+
+    def _get_detailed_video_data_html_fallback(self, video: VideoData) -> VideoData:
+        """Fallback to HTML parsing if API fails"""
+        # This would be your existing HTML parsing method
+        # Renamed to avoid conflicts
+        try:
+            return self._get_detailed_video_data_original(video)
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"HTML fallback also failed for {video.id}: {e}")
+            return video
+
+    def debug_api_response(self, video_id: str) -> dict:
+        """Debug method to see what the API returns"""
+        
+        print(f"🔍 Testing API endpoint for video: {video_id}")
+        print("="*60)
+        
+        try:
+            api_data = self._get_video_data_via_api(video_id)
+            
+            if api_data:
+                print("✅ API request successful!")
+                print(f"📊 Response data:")
+                
+                # Pretty print the API response
+                print(json.dumps(api_data, indent=2, ensure_ascii=False))
+                
+                # Test parsing
+                basic_video = VideoData(id=video_id)
+                parsed_video = self._parse_api_response(api_data, basic_video)
+                
+                print(f"\n📋 Parsed data:")
+                print(f"   Title: {parsed_video.title}")
+                print(f"   Views: {parsed_video.view_count:,}")
+                print(f"   Likes: {parsed_video.like_count}")
+                print(f"   Dislikes: {parsed_video.dislike_count}")
+                print(f"   Description: {len(parsed_video.description)} chars")
+                print(f"   Duration: {parsed_video.duration}")
+                print(f"   Channel: {parsed_video.channel_name}")
+                print(f"   Hashtags: {len(parsed_video.hashtags)} tags")
+                
+                return {
+                    'success': True,
+                    'api_data': api_data,
+                    'parsed_video': parsed_video,
+                    'api_keys': list(api_data.keys()) if isinstance(api_data, dict) else []
+                }
+            else:
+                print("❌ API request failed")
+                return {'success': False, 'error': 'No data received from API'}
+                
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            return {'success': False, 'error': str(e)}
 
     def __enter__(self):
         """Context manager entry"""
