@@ -121,13 +121,9 @@ class DataProcessor:
         video = Video()
         
         try:
-            # Map video_id to id
+            # Core identifiers
             video.id = self._safe_get(data, 'video_id', '')
-            
-            # Map video_name to title
             video.title = self._safe_get(data, 'video_name', '')
-            
-            # Description
             video.description = self._safe_get(data, 'description', '')
             
             # View count
@@ -136,17 +132,21 @@ class DataProcessor:
             # Duration
             video.duration = self._safe_get(data, 'duration', '')
             
-            # Map date_published to upload_date
+            # Upload date
             video.upload_date = self._safe_get(data, 'date_published', '')
             
             # Thumbnail
             video.thumbnail_url = self._safe_get(data, 'thumbnail_url', '')
             
-            # Category (if present)
-            video.category = self._safe_get(data, 'category', '')
+            # Category - use category_id if available
+            video.category_id = self._safe_get(data, 'category_id', '')
+            video.category = video.category_id or self._safe_get(data, 'category', '')
             
-            # Map sensitivity_id to sensitivity
+            # Sensitivity
             video.sensitivity = self._safe_get(data, 'sensitivity_id', '')
+            
+            # State
+            video.state = self._safe_get(data, 'state_id', '')
             
             # Check for is_short/is_shorts
             video.is_short = bool(data.get('is_short', data.get('is_shorts', False)))
@@ -163,17 +163,40 @@ class DataProcessor:
                     video.channel_id = self._safe_get(uploader, 'id', '')
                     video.channel_name = self._safe_get(uploader, 'name', '')
             
-            # Hashtags processing
-            hashtags = data.get('hashtags', data.get('tags', []))
-            if isinstance(hashtags, list):
-                video.hashtags = [
-                    f"#{tag}" if not str(tag).startswith('#') else str(tag) 
-                    for tag in hashtags if tag
-                ]
+            # Profile ID
+            video.profile_id = self._safe_get(data, 'profile_id', '')
+            
+            # Hashtags processing - handle new format
+            hashtags_data = data.get('hashtags', data.get('tags', []))
+            if isinstance(hashtags_data, list):
+                video.hashtags = []
+                for tag_item in hashtags_data:
+                    if isinstance(tag_item, dict):
+                        # New format: {"hashtag_id": "trump", "hashtag_count": 341}
+                        tag_name = tag_item.get('hashtag_id', '')
+                        if tag_name:
+                            video.hashtags.append(f"#{tag_name}" if not tag_name.startswith('#') else tag_name)
+                    elif isinstance(tag_item, str) and tag_item:
+                        # Old format: just string
+                        video.hashtags.append(f"#{tag_item}" if not tag_item.startswith('#') else tag_item)
             
             # Engagement metrics (may be populated later)
             video.like_count = self._safe_int(data.get('like_count', 0))
             video.dislike_count = self._safe_int(data.get('dislike_count', 0))
+            
+            # Flags from video details
+            video.is_liked = bool(data.get('is_liked', False))
+            video.is_disliked = bool(data.get('is_disliked', False))
+            video.is_discussable = bool(data.get('is_discussable', True))
+            
+            # Display settings
+            video.show_comments = bool(data.get('show_comments', True))
+            video.show_adverts = bool(data.get('show_adverts', True))
+            video.show_promo = bool(data.get('show_promo', True))
+            video.show_rantrave = bool(data.get('show_rantrave', False))
+            
+            # External IDs
+            video.rumble_id = self._safe_get(data, 'rumble_id', '')
             
             # URLs
             if video.id:
@@ -186,12 +209,9 @@ class DataProcessor:
                 else:
                     video.video_url = relative_url
             
-            # Media URL if present
+            # Media URL and type if present
             video.media_url = self._safe_get(data, 'media_url', '')
-            
-            # Additional fields that might be useful (store in description or create new fields)
-            # state_id could be useful for filtering published vs unpublished videos
-            state_id = self._safe_get(data, 'state_id', '')
+            video.media_type = self._safe_get(data, 'media_type', '')
             
         except Exception as e:
             logger.warning(f"Error parsing video data: {e}")
@@ -212,31 +232,43 @@ class DataProcessor:
         channel = Channel()
         
         try:
-            # Map channel_id to id
+            # Core identifiers
             channel.id = self._safe_get(data, 'channel_id', self._safe_get(data, 'id', ''))
-            
-            # Map channel_name to name
             channel.name = self._safe_get(data, 'channel_name', self._safe_get(data, 'name', data.get('title', '')))
-            
-            # Description
             channel.description = self._safe_get(data, 'description', '')
+            channel.url_slug = self._safe_get(data, 'url_slug', '')
             
-            # Stats
+            # Statistics
             channel.video_count = self._safe_int(data.get('video_count', 0))
             channel.subscriber_count = str(data.get('subscriber_count', ''))
             channel.view_count = self._safe_int(data.get('view_count', 0))
             
             # Dates
-            channel.created_date = self._safe_get(data, 'created_at', data.get('date_created', ''))
+            channel.created_date = self._safe_get(data, 'date_created', data.get('created_at', ''))
+            channel.last_video_published = self._safe_get(data, 'last_video_published', '')
             
-            # Category
-            channel.category = self._safe_get(data, 'category', '')
+            # Profile information
+            channel.profile_id = self._safe_get(data, 'profile_id', '')
+            channel.profile_name = self._safe_get(data, 'profile_name', '')
             
-            # Thumbnail
+            # If profile is nested object
+            profile = data.get('profile', {})
+            if isinstance(profile, dict):
+                channel.profile_id = channel.profile_id or self._safe_get(profile, 'profile_id', '')
+                channel.profile_name = channel.profile_name or self._safe_get(profile, 'profile_name', '')
+            
+            # Categories
+            channel.category_id = self._safe_get(data, 'category_id', '')
+            channel.category = channel.category_id or self._safe_get(data, 'category', '')
+            channel.sensitivity_id = self._safe_get(data, 'sensitivity_id', '')
+            channel.sensitivity = channel.sensitivity_id or self._safe_get(data, 'sensitivity', '')
+            
+            # State
+            channel.state_id = self._safe_get(data, 'state_id', '')
+            channel.state = channel.state_id or self._safe_get(data, 'state', '')
+            
+            # URLs
             channel.thumbnail_url = self._safe_get(data, 'thumbnail_url', '')
-            
-            # Verification status
-            channel.is_verified = bool(data.get('is_verified', False))
             
             # Build channel URL
             if channel.id:
@@ -248,6 +280,21 @@ class DataProcessor:
                     channel.channel_url = f"https://www.bitchute.com{relative_url}"
                 else:
                     channel.channel_url = relative_url
+            
+            # Additional settings
+            channel.membership_level = self._safe_get(data, 'membership_level', 'Default')
+            channel.is_verified = bool(data.get('is_verified', False))
+            channel.is_subscribed = bool(data.get('is_subscribed', False))
+            channel.is_notified = bool(data.get('is_notified', False))
+            
+            # Display settings
+            channel.show_adverts = bool(data.get('show_adverts', True))
+            channel.show_comments = bool(data.get('show_comments', True))
+            channel.show_rantrave = bool(data.get('show_rantrave', True))
+            
+            # Features
+            channel.live_stream_enabled = bool(data.get('live_stream_enabled', False))
+            channel.feature_video = data.get('feature_video')
             
         except Exception as e:
             logger.warning(f"Error parsing channel data: {e}")
@@ -268,7 +315,16 @@ class DataProcessor:
         hashtag = Hashtag()
         
         try:
-            hashtag.name = self._safe_get(data, 'name', '')
+            # Handle both old and new formats
+            if 'hashtag_id' in data:
+                # New format from video details
+                hashtag.name = self._safe_get(data, 'hashtag_id', '')
+                hashtag.video_count = self._safe_int(data.get('hashtag_count', 0))
+            else:
+                # Old format
+                hashtag.name = self._safe_get(data, 'name', '')
+                hashtag.video_count = self._safe_int(data.get('video_count', 0))
+            
             hashtag.rank = rank
             
             # Build hashtag URL
@@ -297,6 +353,7 @@ class DataProcessor:
         except (ValueError, TypeError):
             return 0
 
+            
 class PaginationHelper:
     """Helper for handling paginated API responses"""
     

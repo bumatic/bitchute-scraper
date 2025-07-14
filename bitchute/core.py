@@ -42,7 +42,7 @@ class SensitivityLevel(Enum):
 class SortOrder(Enum):
     """Video sort orders"""
     NEW = "new"
-    RELEVANT = "relevant"
+    OLD = "old"
     VIEWS = "views"
 
 
@@ -247,21 +247,23 @@ class BitChuteAPI:
                 logger.error(error_msg)
             
             raise BitChuteAPIError(error_msg) from e
-    
+
 
     def get_trending_videos(
         self, 
         timeframe: str = 'day', 
-        limit: int = 20,
-        per_page: int = 50
+        limit: int = 50,
+        per_page: int = 50,
+        include_details: bool = False
     ) -> pd.DataFrame:
         """
-        Get trending videos with automatic pagination
+        Get trending videos with automatic pagination and optional detailed info
         
         Args:
             timeframe: 'day', 'week', or 'month'
             limit: Total number of videos to retrieve (default: 50)
             per_page: Number of videos per API call (default: 50, max: 100)
+            include_details: Fetch additional details for each video (counts, media)
             
         Returns:
             DataFrame with all requested videos
@@ -305,6 +307,11 @@ class BitChuteAPI:
             videos = []
             for i, video_data in enumerate(data['videos'], 1):
                 video = self.data_processor.parse_video(video_data, offset + i)
+                
+                # Fetch additional details if requested
+                if include_details and video.id:
+                    self._enrich_video_details(video)
+                
                 videos.append(asdict(video))
             
             if videos:
@@ -555,10 +562,11 @@ class BitChuteAPI:
         sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
         sort: Union[str, SortOrder] = SortOrder.NEW,
         limit: int = 50,
-        per_page: int = 50
+        per_page: int = 50,
+        include_details: bool = False
     ) -> pd.DataFrame:
         """
-        Search for videos with automatic pagination
+        Search for videos with automatic pagination and optional details
         
         Args:
             query: Search query
@@ -566,6 +574,7 @@ class BitChuteAPI:
             sort: Sort order
             limit: Total number of results to retrieve (default: 50)
             per_page: Number of results per API call (default: 50, max: 100)
+            include_details: Fetch additional details for each video
             
         Returns:
             DataFrame with all search results
@@ -612,6 +621,11 @@ class BitChuteAPI:
             videos = []
             for i, video_data in enumerate(data['videos'], 1):
                 video = self.data_processor.parse_video(video_data, offset + i)
+                
+                # Fetch additional details if requested
+                if include_details and video.id:
+                    self._enrich_video_details(video)
+                
                 videos.append(asdict(video))
             
             if videos:
@@ -808,7 +822,7 @@ class BitChuteAPI:
         include_media: bool = False
     ) -> Optional[Video]:
         """
-        Get detailed video information
+        Get detailed video information with all available fields
         
         Args:
             video_id: Video identifier
@@ -822,12 +836,13 @@ class BitChuteAPI:
         
         payload = {"video_id": video_id}
         
-        # Get basic video data
+        # Get basic video data from beta9 (doesn't require token)
         data = self._make_request("beta9/video", payload, require_token=False)
         if not data:
             return None
         
-        video = self.data_processor.parse_video(data)
+        # Parse video with updated field mappings
+        video = self._parse_video_details(data)
         
         # Get like/dislike counts if requested
         if include_counts:
@@ -836,6 +851,10 @@ class BitChuteAPI:
                 if counts_data:
                     video.like_count = int(counts_data.get('like_count', 0) or 0)
                     video.dislike_count = int(counts_data.get('dislike_count', 0) or 0)
+                    # Update view count if more recent
+                    new_view_count = int(counts_data.get('view_count', video.view_count) or video.view_count)
+                    if new_view_count > video.view_count:
+                        video.view_count = new_view_count
             except Exception as e:
                 if self.verbose:
                     logger.warning(f"Failed to get counts for {video_id}: {e}")
@@ -846,12 +865,304 @@ class BitChuteAPI:
                 media_data = self._make_request("beta/video/media", payload)
                 if media_data:
                     video.media_url = media_data.get('media_url', '')
+                    video.media_type = media_data.get('media_type', '')
             except Exception as e:
                 if self.verbose:
                     logger.warning(f"Failed to get media URL for {video_id}: {e}")
         
         return video
-    
+
+
+    def _enrich_video_details(self, video: Video):
+        """
+        Enrich video object with additional details from other endpoints
+        
+        Args:
+            video: Video object to enrich
+        """
+        try:
+            # Get counts
+            counts_data = self._make_request("beta/video/counts", {"video_id": video.id})
+            if counts_data:
+                video.like_count = int(counts_data.get('like_count', 0) or 0)
+                video.dislike_count = int(counts_data.get('dislike_count', 0) or 0)
+                # Update view count if different
+                new_view_count = int(counts_data.get('view_count', video.view_count) or video.view_count)
+                if new_view_count > video.view_count:
+                    video.view_count = new_view_count
+            
+            # Small delay to avoid rate limiting
+            time.sleep(0.2)
+            
+            # Get media URL
+            media_data = self._make_request("beta/video/media", {"video_id": video.id})
+            if media_data:
+                video.media_url = media_data.get('media_url', '')
+                video.media_type = media_data.get('media_type', '')
+                
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"Failed to enrich video {video.id}: {e}")
+
+    def _parse_video_details(self, data: Dict[str, Any]) -> Video:
+        """Parse video details from beta9/video endpoint"""
+        video = Video()
+        
+        # Basic fields
+        video.id = data.get('video_id', '')
+        video.title = data.get('video_name', '')
+        video.description = data.get('description', '')
+        video.view_count = int(data.get('view_count', 0) or 0)
+        video.duration = data.get('duration', '')
+        video.upload_date = data.get('date_published', '')
+        video.thumbnail_url = data.get('thumbnail_url', '')
+        
+        # Category mapping
+        video.category_id = data.get('category_id', '')
+        video.category = video.category_id  # Use ID as category name for now
+        
+        # Sensitivity
+        video.sensitivity = data.get('sensitivity_id', '')
+        
+        # State
+        video.state = data.get('state_id', '')
+        
+        # Channel information
+        channel_data = data.get('channel', {})
+        if channel_data:
+            video.channel_id = channel_data.get('channel_id', '')
+            video.channel_name = channel_data.get('channel_name', '')
+        
+        # Hashtags with proper parsing
+        hashtags_data = data.get('hashtags', [])
+        if hashtags_data:
+            video.hashtags = []
+            for tag_item in hashtags_data:
+                if isinstance(tag_item, dict):
+                    # New format: {"hashtag_id": "trump", "hashtag_count": 341}
+                    tag_name = tag_item.get('hashtag_id', '')
+                    if tag_name:
+                        video.hashtags.append(f"#{tag_name}" if not tag_name.startswith('#') else tag_name)
+                elif isinstance(tag_item, str):
+                    # Old format: just string
+                    video.hashtags.append(f"#{tag_item}" if not tag_item.startswith('#') else tag_item)
+        
+        # Flags
+        video.is_liked = bool(data.get('is_liked', False))
+        video.is_disliked = bool(data.get('is_disliked', False))
+        video.is_discussable = bool(data.get('is_discussable', True))
+        
+        # Display settings
+        video.show_comments = bool(data.get('show_comments', True))
+        video.show_adverts = bool(data.get('show_adverts', True))
+        video.show_promo = bool(data.get('show_promo', True))
+        video.show_rantrave = bool(data.get('show_rantrave', False))
+        
+        # Other IDs
+        video.profile_id = data.get('profile_id', '')
+        video.rumble_id = data.get('rumble_id', '')
+        
+        # Build full URL
+        if video.id:
+            video.video_url = f"https://www.bitchute.com/video/{video.id}/"
+        
+        return video
+
+
+    def get_channel_details(self, channel_id: str) -> Optional[Channel]:
+        """
+        Get detailed channel information
+        
+        Args:
+            channel_id: Channel identifier
+            
+        Returns:
+            Channel object or None if not found
+            
+        Example:
+            >>> channel = api.get_channel_details('R7juPfa5uBpC')
+            >>> print(f"Channel: {channel.name} - {channel.subscriber_count} subscribers")
+        """
+        # Validate channel ID format
+        if not channel_id or not isinstance(channel_id, str):
+            raise ValidationError("Channel ID must be a non-empty string", "channel_id")
+        
+        payload = {"channel_id": channel_id}
+        
+        # Get channel details
+        data = self._make_request("beta/channel", payload)
+        if not data:
+            return None
+        
+        # Parse channel with all fields
+        channel = self._parse_channel_details(data)
+        
+        if self.verbose:
+            logger.info(f"Retrieved details for channel: {channel.name}")
+        
+        return channel
+
+    def _parse_channel_details(self, data: Dict[str, Any]) -> Channel:
+        """Parse channel details from beta/channel endpoint"""
+        channel = Channel()
+        
+        # Core fields
+        channel.id = data.get('channel_id', '')
+        channel.name = data.get('channel_name', '')
+        channel.description = data.get('description', '')
+        channel.url_slug = data.get('url_slug', '')
+        
+        # Statistics
+        channel.video_count = int(data.get('video_count', 0) or 0)
+        channel.view_count = int(data.get('view_count', 0) or 0)
+        channel.subscriber_count = str(data.get('subscriber_count', ''))
+        
+        # Dates
+        channel.created_date = data.get('date_created', '')
+        channel.last_video_published = data.get('last_video_published', '')
+        
+        # Profile
+        channel.profile_id = data.get('profile_id', '')
+        channel.profile_name = data.get('profile_name', '')
+        
+        # Categories
+        channel.category_id = data.get('category_id', '')
+        channel.category = channel.category_id
+        channel.sensitivity_id = data.get('sensitivity_id', '')
+        channel.sensitivity = channel.sensitivity_id
+        
+        # State
+        channel.state_id = data.get('state_id', '')
+        channel.state = channel.state_id
+        
+        # URLs
+        channel.thumbnail_url = data.get('thumbnail_url', '')
+        channel_url = data.get('channel_url', '')
+        if channel_url and channel_url.startswith('/'):
+            channel.channel_url = f"https://www.bitchute.com{channel_url}"
+        else:
+            channel.channel_url = channel_url
+        
+        # Settings
+        channel.membership_level = data.get('membership_level', 'Default')
+        channel.is_subscribed = bool(data.get('is_subscribed', False))
+        channel.is_notified = bool(data.get('is_notified', False))
+        channel.show_adverts = bool(data.get('show_adverts', True))
+        channel.show_comments = bool(data.get('show_comments', True))
+        channel.show_rantrave = bool(data.get('show_rantrave', True))
+        channel.live_stream_enabled = bool(data.get('live_stream_enabled', False))
+        channel.feature_video = data.get('feature_video')
+        
+        return channel
+
+    def get_channel_videos(
+        self,
+        channel_id: str,
+        limit: int = 50,
+        per_page: int = 50,
+        order_by: str = "latest"
+    ) -> pd.DataFrame:
+        """
+        Get videos from a specific channel with pagination
+        
+        Args:
+            channel_id: Channel identifier
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50)
+            order_by: Sort order ('latest', 'popular', 'oldest')
+            
+        Returns:
+            DataFrame with channel videos
+            
+        Example:
+            >>> videos = api.get_channel_videos('R7juPfa5uBpC', limit=100)
+            >>> print(f"Retrieved {len(videos)} videos")
+        """
+        # Validate inputs
+        if not channel_id or not isinstance(channel_id, str):
+            raise ValidationError("Channel ID must be a non-empty string", "channel_id")
+        
+        if order_by not in ['latest', 'popular', 'oldest']:
+            raise ValidationError("order_by must be 'latest', 'popular', or 'oldest'", "order_by")
+        
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "channel_id": channel_id,
+                "offset": offset,
+                "limit": page_limit,
+                "order_by": order_by
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching channel videos: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/channel/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} videos from channel {channel_id}")
+            return df
+        
+        return pd.DataFrame()
+
+    def get_profile_links(self, profile_id: str, limit: int = 10) -> List[Dict[str, str]]:
+        """
+        Get links associated with a profile
+        
+        Args:
+            profile_id: Profile identifier
+            limit: Maximum number of links (default: 10)
+            
+        Returns:
+            List of link dictionaries
+            
+        Example:
+            >>> links = api.get_profile_links('kJFAIAhpktb6')
+            >>> for link in links:
+            >>>     print(f"{link['title']}: {link['url']}")
+        """
+        if not profile_id or not isinstance(profile_id, str):
+            raise ValidationError("Profile ID must be a non-empty string", "profile_id")
+        
+        payload = {
+            "profile_id": profile_id,
+            "offset": 0,
+            "limit": limit
+        }
+        
+        data = self._make_request("beta/profile/links", payload)
+        if data and 'links' in data:
+            return data['links']
+        return []
+
+
+
     def get_api_stats(self) -> Dict[str, Any]:
         """Get API usage statistics"""
         uptime = time.time() - self.stats['last_request_time'] if self.stats['last_request_time'] else 0

@@ -10,24 +10,53 @@ from datetime import datetime
 @dataclass
 class Video:
     """Video data model with comprehensive fields"""
+    # Core identifiers
     id: str = ""
     title: str = ""
     description: str = ""
+    
+    # View and engagement metrics
     view_count: int = 0
     like_count: int = 0
     dislike_count: int = 0
+    
+    # Video properties
     duration: str = ""
-    channel_id: str = ""
-    channel_name: str = ""
-    upload_date: str = ""
     thumbnail_url: str = ""
     video_url: str = ""
     media_url: str = ""
-    hashtags: List[str] = field(default_factory=list)
+    media_type: str = ""
+    
+    # Channel information
+    channel_id: str = ""
+    channel_name: str = ""
+    profile_id: str = ""
+    
+    # Categorization
     category: str = ""
+    category_id: str = ""
     sensitivity: str = ""
+    hashtags: List[str] = field(default_factory=list)
+    
+    # Status and flags
+    state: str = ""  # published, etc.
     is_short: bool = False
+    is_liked: bool = False
+    is_disliked: bool = False
+    is_discussable: bool = True
+    
+    # Display settings
+    show_comments: bool = True
+    show_adverts: bool = True
+    show_promo: bool = True
+    show_rantrave: bool = False
+    
+    # Timestamps
+    upload_date: str = ""
     scrape_timestamp: float = 0.0
+    
+    # External IDs
+    rumble_id: str = ""
     
     def __post_init__(self):
         """Initialize computed fields"""
@@ -84,35 +113,82 @@ class Video:
             'duration_seconds': self.duration_seconds,
             'channel_id': self.channel_id,
             'channel_name': self.channel_name,
+            'profile_id': self.profile_id,
             'upload_date': self.upload_date,
             'thumbnail_url': self.thumbnail_url,
             'video_url': self.video_url,
             'media_url': self.media_url,
+            'media_type': self.media_type,
             'hashtags': self.hashtags,
             'category': self.category,
+            'category_id': self.category_id,
             'sensitivity': self.sensitivity,
+            'state': self.state,
             'is_short': self.is_short,
+            'is_liked': self.is_liked,
+            'is_disliked': self.is_disliked,
+            'is_discussable': self.is_discussable,
+            'show_comments': self.show_comments,
+            'show_adverts': self.show_adverts,
+            'show_promo': self.show_promo,
+            'show_rantrave': self.show_rantrave,
             'engagement_rate': self.engagement_rate,
             'like_ratio': self.like_ratio,
+            'rumble_id': self.rumble_id,
             'scrape_timestamp': self.scrape_timestamp
         }
         return data
 
-
 @dataclass
 class Channel:
-    """Channel data model"""
+    """Channel data model with comprehensive fields"""
+    # Core identifiers
     id: str = ""
     name: str = ""
     description: str = ""
+    url_slug: str = ""
+    
+    # Statistics
     video_count: int = 0
     subscriber_count: str = ""
     view_count: int = 0
+    
+    # Dates
     created_date: str = ""
+    last_video_published: str = ""
+    
+    # Profile information
+    profile_id: str = ""
+    profile_name: str = ""
+    
+    # Categorization
     category: str = ""
+    category_id: str = ""
+    sensitivity: str = ""
+    sensitivity_id: str = ""
+    
+    # URLs
     thumbnail_url: str = ""
     channel_url: str = ""
+    
+    # Status and settings
+    state: str = ""
+    state_id: str = ""
+    membership_level: str = "Default"
     is_verified: bool = False
+    is_subscribed: bool = False
+    is_notified: bool = False
+    
+    # Display settings
+    show_adverts: bool = True
+    show_comments: bool = True
+    show_rantrave: bool = True
+    
+    # Features
+    live_stream_enabled: bool = False
+    feature_video: Optional[str] = None
+    
+    # Metadata
     scrape_timestamp: float = 0.0
     
     def __post_init__(self):
@@ -155,19 +231,35 @@ class Channel:
             'id': self.id,
             'name': self.name,
             'description': self.description,
+            'url_slug': self.url_slug,
             'video_count': self.video_count,
             'subscriber_count': self.subscriber_count,
             'subscriber_count_numeric': self.subscriber_count_numeric,
             'view_count': self.view_count,
             'average_views_per_video': self.average_views_per_video,
             'created_date': self.created_date,
+            'last_video_published': self.last_video_published,
+            'profile_id': self.profile_id,
+            'profile_name': self.profile_name,
             'category': self.category,
+            'category_id': self.category_id,
+            'sensitivity': self.sensitivity,
+            'sensitivity_id': self.sensitivity_id,
             'thumbnail_url': self.thumbnail_url,
             'channel_url': self.channel_url,
+            'state': self.state,
+            'state_id': self.state_id,
+            'membership_level': self.membership_level,
             'is_verified': self.is_verified,
+            'is_subscribed': self.is_subscribed,
+            'is_notified': self.is_notified,
+            'show_adverts': self.show_adverts,
+            'show_comments': self.show_comments,
+            'show_rantrave': self.show_rantrave,
+            'live_stream_enabled': self.live_stream_enabled,
+            'feature_video': self.feature_video,
             'scrape_timestamp': self.scrape_timestamp
         }
-
 
 @dataclass
 class Hashtag:
@@ -211,6 +303,18 @@ class Hashtag:
             'scrape_timestamp': self.scrape_timestamp
         }
 
+@dataclass 
+class Profile:
+    """Profile data model (for channel owners)"""
+    profile_id: str = ""
+    profile_name: str = ""
+    profile_url: str = ""
+    profile_thumbnail_url: str = ""
+    
+    def __post_init__(self):
+        """Initialize computed fields"""
+        if not self.profile_url and self.profile_id:
+            self.profile_url = f"https://www.bitchute.com/profile/{self.profile_id}/"
 
 @dataclass
 class SearchResult:
@@ -242,7 +346,6 @@ class SearchResult:
     def channel_count(self) -> int:
         """Number of channels in results"""
         return len(self.channels)
-
 
 @dataclass
 class APIStats:

@@ -46,6 +46,9 @@ json_data = {
 }
 ```
 
+
+    'fields': ['video_id', 'video_name']
+    
 On the fontend the sections popular (fresh), all, members picked and search support pagination. The trending sections only show 20 results at a time.
 
 Popular, all and members_picked probably also have a limit. 

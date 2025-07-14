@@ -13,7 +13,7 @@ class InputValidator:
     # Valid values for various parameters
     VALID_TIMEFRAMES = ['day', 'week', 'month']
     VALID_SENSITIVITIES = ['normal', 'nsfw', 'nsfl']
-    VALID_SORT_ORDERS = ['new', 'relevant', 'views']
+    VALID_SORT_ORDERS = ['new', 'old', 'views']
     VALID_SELECTIONS = ['trending-day', 'trending-week', 'trending-month', 'popular', 'all']
     
     # Regex patterns
@@ -142,14 +142,18 @@ class InputValidator:
         if not re.match(r'^[a-zA-Z0-9/_-]+$', endpoint):
             raise ValidationError(f"Invalid endpoint format: '{endpoint}'", "endpoint")
         
-        # Check for common endpoint patterns
+        # Check for common endpoint patterns - UPDATED WITH NEW ENDPOINTS
         valid_patterns = [
             r'^beta/videos',
             r'^beta/search/videos',
             r'^beta/search/channels',
             r'^beta/video/counts',
             r'^beta/video/media',
+            r'^beta/video/comments',
             r'^beta/member_liked_videos',
+            r'^beta/channel$',              # NEW: channel details
+            r'^beta/channel/videos',        # NEW: channel videos
+            r'^beta/profile/links',         # NEW: profile links
             r'^beta9/video',
             r'^beta9/hashtag/trending/'
         ]
