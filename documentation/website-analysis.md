@@ -33,6 +33,8 @@ headers = {
 
 ```
 
+**Endpoint:** https://api.bitchute.com/api/beta/videos
+
 **Params** for the request
 
 ```Pthon
@@ -44,8 +46,9 @@ json_data = {
 }
 ```
 
-**Endpoint:** https://api.bitchute.com/api/beta/videos
+On the fontend the sections popular (fresh), all, members picked and search support pagination. The trending sections only show 20 results at a time.
 
+Popular, all and members_picked probably also have a limit. 
 
 ### Trending Videos 
 
@@ -114,237 +117,81 @@ json_data = {
 }
 ```
 
+### Shorts
+
+**Endpoint:** https://api.bitchute.com/api/beta9/video
+
+**Params:**
+
+```Python
+json_data = {
+    'selection': 'all',
+    'offset': 0,
+    'limit': 50,
+    'advertisable': True,
+    'is_short': True,
+}
+```
+
+### Trending Hashtags
+
+**Endpoint:** https://api.bitchute.com/api/beta9/hashtag/trending/
+
+**Params:**
+
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 20,
+}
+```
 
 
-Member liked:
-  curl 'https://api.bitchute.com/api/beta/member_liked_videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"limit":24}'
+### All videos
 
-Shorts:
-curl 'https://api.bitchute.com/api/beta/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"selection":"all","offset":0,"limit":50,"advertisable":true,"is_short":true}'
+**Endpoint:** https://api.bitchute.com/api/beta/videos
+
+**Params:**
+
+```Python
+json_data = {
+    'selection': 'all',
+    'offset': 0,
+    'limit': 30,
+    'advertisable': True,
+}
+```
 
 
-Trending hashtags:
-curl 'https://api.bitchute.com/api/beta9/hashtag/trending/' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  --data-raw '{"offset":0,"limit":20}'
+### Search videos
+**Endpoint:** https://api.bitchute.com/api/beta/search/videos
 
-All videos:
-  curl 'https://api.bitchute.com/api/beta/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"selection":"all","offset":0,"limit":30,"advertisable":true}'
+**Params:**
 
-All videos more:
-  curl 'https://api.bitchute.com/api/beta/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"selection":"all","offset":30,"limit":30,"advertisable":true}'
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 50,
+    'query': 'QUERY TERM',
+    'sensitivity_id': 'normal', # or 'nsfw' or 'nsfl'
+    'sort': 'new',
+}
+```
 
+### Search Channels
 
-  curl 'https://api.bitchute.com/api/beta/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"selection":"all","offset":60,"limit":30,"advertisable":true}'
+**Endpoint:** 
 
-Search videos 1
-curl 'https://api.bitchute.com/api/beta/search/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"contrapoints","sensitivity_id":"normal","sort":"new"}'
+**Params:**
 
-Search videos 2
-curl 'https://api.bitchute.com/api/beta/search/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"contrapoints","sensitivity_id":"nsfw","sort":"new"}'
-
-  Search videos 3:
-  curl 'https://api.bitchute.com/api/beta/search/videos' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"contrapoints","sensitivity_id":"nsfl","sort":"new"}'
-
-Search channels 1:
-curl 'https://api.bitchute.com/api/beta/search/channels' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"trump","sensitivity_id":"normal"}'
-
-Search channels 2:
-curl 'https://api.bitchute.com/api/beta/search/channels' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"trump","sensitivity_id":"nsfw"}'
-
-Search channels 3:
-curl 'https://api.bitchute.com/api/beta/search/channels' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' \
-  -H 'content-type: application/json' \
-  -H 'origin: https://www.bitchute.com' \
-  -H 'priority: u=1, i' \
-  -H 'referer: https://www.bitchute.com/' \
-  -H 'sec-ch-ua: "Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"' \
-  -H 'sec-ch-ua-mobile: ?0' \
-  -H 'sec-ch-ua-platform: "macOS"' \
-  -H 'sec-fetch-dest: empty' \
-  -H 'sec-fetch-mode: cors' \
-  -H 'sec-fetch-site: same-site' \
-  -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36' \
-  -H 'x-service-info: 6t5eya4t4b4lwi3zjh6dxu6y9j6i' \
-  --data-raw '{"offset":0,"limit":50,"query":"trump","sensitivity_id":"nsfl"}'
-
-
-Sections with pagination
-- popular
-- all
-- members picked
-- search
-
-Sections without pagination on the frontend:
-- Trending has no frontend pagination but the api seems to allow for it.
-
-
-The x-service-info seems to path some sort of credentials that are generaed when visiting the site. Can we use selenium to visit the site an extract this token? Can we make ure that this is only done once the current token fails.
-
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 50,
+    'query': 'QUERY TERM',
+    'sensitivity_id': 'normal', # 'nsfw' or 'nsfl'
+}
+```
 
 
 
