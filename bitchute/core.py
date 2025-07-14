@@ -57,14 +57,7 @@ class VideoSelection(Enum):
 
 class BitChuteAPI:
     """
-    Modern BitChute API client with improved architecture
-    
-    Features:
-    - Robust error handling and retries
-    - Efficient token management
-    - Rate limiting and request optimization
-    - Comprehensive data validation
-    - Enhanced logging and monitoring
+    BitChute API client
     """
     
     def __init__(
@@ -255,30 +248,30 @@ class BitChuteAPI:
             
             raise BitChuteAPIError(error_msg) from e
     
+
     def get_trending_videos(
         self, 
         timeframe: str = 'day', 
         limit: int = 20,
-        offset: int = 0
+        per_page: int = 50
     ) -> pd.DataFrame:
         """
-        Get trending videos with improved validation and error handling
+        Get trending videos with automatic pagination
         
         Args:
             timeframe: 'day', 'week', or 'month'
-            limit: Number of videos to retrieve (1-100)
-            offset: Pagination offset
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50, max: 100)
             
         Returns:
-            DataFrame with video data
-            
-        Raises:
-            ValidationError: For invalid parameters
+            DataFrame with all requested videos
         """
         # Validate inputs
         self.validator.validate_timeframe(timeframe)
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
+        self.validator.validate_limit(per_page, max_limit=100)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
         
         selection_map = {
             'day': VideoSelection.TRENDING_DAY.value,
@@ -286,116 +279,508 @@ class BitChuteAPI:
             'month': VideoSelection.TRENDING_MONTH.value
         }
         
-        payload = {
-            "selection": selection_map[timeframe],
-            "offset": offset,
-            "limit": limit,
-            "advertisable": True
-        }
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
         
-        data = self._make_request("beta/videos", payload)
-        if not data or 'videos' not in data:
-            return pd.DataFrame()
+        while total_retrieved < limit:
+            # Calculate how many to fetch this page
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "selection": selection_map[timeframe],
+                "offset": offset,
+                "limit": page_limit,
+                "advertisable": True
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching trending videos: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break  # No more videos available
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+                
+                if self.verbose:
+                    logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
+            
+            # Check if we got fewer videos than requested (end of data)
+            if len(videos) < page_limit:
+                break
+            
+            # Small delay between requests
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
         
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, offset + i)
-            videos.append(asdict(video))
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} trending videos ({timeframe})")
+            return df
         
-        df = pd.DataFrame(videos)
+        return pd.DataFrame()
+
+    def get_popular_videos(self, limit: int = 500, per_page: int = 50) -> pd.DataFrame:
+        """
+        Get popular videos with automatic pagination
         
+        Args:
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all requested videos
+        """
+        self.validator.validate_limit(per_page, max_limit=100)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
+        
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "selection": VideoSelection.POPULAR.value,
+                "offset": offset,
+                "limit": page_limit,
+                "advertisable": True
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching popular videos: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} popular videos")
+            return df
+        
+        return pd.DataFrame()
+
+    def get_recent_videos(self, limit: int = 50, per_page: int = 50) -> pd.DataFrame:
+        """
+        Get recent videos (all videos) with automatic pagination
+        
+        Args:
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all requested videos
+        """
+        self.validator.validate_limit(per_page, max_limit=100)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
+        
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "selection": VideoSelection.ALL.value,
+                "offset": offset,
+                "limit": page_limit,
+                "advertisable": True
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching recent videos: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+                
+                if self.verbose:
+                    logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} recent videos")
+            return df
+        
+        return pd.DataFrame()
+
+    def get_all_videos(self, limit: int = 1000, per_page: int = 50) -> pd.DataFrame:
+        """
+        Get all videos (convenience method for getting many recent videos)
+        
+        This is a convenience wrapper around get_recent_videos with higher default limit.
+        
+        Args:
+            limit: Total number of videos to retrieve (default: 1000)
+            per_page: Number of videos per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all requested videos
+            
+        Example:
+            >>> # Get 1000 most recent videos
+            >>> df = api.get_all_videos()
+            
+            >>> # Get 5000 videos
+            >>> df = api.get_all_videos(limit=5000)
+            
+            >>> # Get all available videos (up to 10k)
+            >>> df = api.get_all_videos(limit=10000)
+        """
         if self.verbose:
-            logger.info(f"Retrieved {len(videos)} trending videos ({timeframe})")
+            logger.info(f"Getting all videos (up to {limit})")
         
-        return df
-    
-    def get_popular_videos(self, limit: int = 30, offset: int = 0) -> pd.DataFrame:
-        """Get popular videos"""
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
+        return self.get_recent_videos(limit=limit, per_page=per_page)
+
+    def get_shorts(self, limit: int = 50, per_page: int = 50) -> pd.DataFrame:
+        """
+        Get short videos with automatic pagination
         
-        payload = {
-            "selection": VideoSelection.POPULAR.value,
-            "offset": offset,
-            "limit": limit,
-            "advertisable": True
-        }
+        Args:
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all requested videos
+        """
+        self.validator.validate_limit(per_page, max_limit=100)
         
-        data = self._make_request("beta/videos", payload)
-        if not data or 'videos' not in data:
-            return pd.DataFrame()
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
         
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, offset + i)
-            videos.append(asdict(video))
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
         
-        df = pd.DataFrame(videos)
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "selection": VideoSelection.ALL.value,
+                "offset": offset,
+                "limit": page_limit,
+                "advertisable": True,
+                "is_short": True
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching shorts: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
         
-        if self.verbose:
-            logger.info(f"Retrieved {len(videos)} popular videos")
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} shorts")
+            return df
         
-        return df
-    
-    def get_recent_videos(self, limit: int = 30, offset: int = 0) -> pd.DataFrame:
-        """Get recent videos"""
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
+        return pd.DataFrame()
+
+    def search_videos(
+        self, 
+        query: str, 
+        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
+        sort: Union[str, SortOrder] = SortOrder.NEW,
+        limit: int = 50,
+        per_page: int = 50
+    ) -> pd.DataFrame:
+        """
+        Search for videos with automatic pagination
         
-        payload = {
-            "selection": VideoSelection.ALL.value,
-            "offset": offset,
-            "limit": limit,
-            "advertisable": True
-        }
+        Args:
+            query: Search query
+            sensitivity: Content sensitivity level
+            sort: Sort order
+            limit: Total number of results to retrieve (default: 50)
+            per_page: Number of results per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all search results
+        """
+        # Validate inputs
+        self.validator.validate_search_query(query)
+        self.validator.validate_limit(per_page, max_limit=100)
         
-        data = self._make_request("beta/videos", payload)
-        if not data or 'videos' not in data:
-            return pd.DataFrame()
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
         
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, offset + i)
-            videos.append(asdict(video))
+        # Handle enum conversion
+        if isinstance(sensitivity, SensitivityLevel):
+            sensitivity = sensitivity.value
+        if isinstance(sort, SortOrder):
+            sort = sort.value
+            
+        self.validator.validate_sensitivity(sensitivity)
+        self.validator.validate_sort_order(sort)
         
-        df = pd.DataFrame(videos)
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
         
-        if self.verbose:
-            logger.info(f"Retrieved {len(videos)} recent videos")
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "offset": offset,
+                "limit": page_limit,
+                "query": query,
+                "sensitivity_id": sensitivity,
+                "sort": sort
+            }
+            
+            if self.verbose:
+                logger.info(f"Searching videos '{query}': offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/search/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(asdict(video))
+            
+            if videos:
+                all_videos.append(pd.DataFrame(videos))
+                total_retrieved += len(videos)
+                offset += len(videos)
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
         
-        return df
-    
-    def get_shorts(self, limit: int = 50, offset: int = 0) -> pd.DataFrame:
-        """Get short videos"""
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
+        if all_videos:
+            df = pd.concat(all_videos, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Found {len(df)} videos for '{query}'")
+            return df
         
-        payload = {
-            "selection": VideoSelection.ALL.value,
-            "offset": offset,
-            "limit": limit,
-            "advertisable": True,
-            "is_short": True
-        }
+        return pd.DataFrame()
+
+    def search_channels(
+        self, 
+        query: str, 
+        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
+        limit: int = 50,
+        per_page: int = 50
+    ) -> pd.DataFrame:
+        """
+        Search for channels with automatic pagination
         
-        data = self._make_request("beta/videos", payload)
-        if not data or 'videos' not in data:
-            return pd.DataFrame()
+        Args:
+            query: Search query
+            sensitivity: Content sensitivity level
+            limit: Total number of results to retrieve (default: 50)
+            per_page: Number of results per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all search results
+        """
+        self.validator.validate_search_query(query)
+        self.validator.validate_limit(per_page, max_limit=100)
         
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, offset + i)
-            videos.append(asdict(video))
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
         
-        df = pd.DataFrame(videos)
+        if isinstance(sensitivity, SensitivityLevel):
+            sensitivity = sensitivity.value
         
-        if self.verbose:
-            logger.info(f"Retrieved {len(videos)} shorts")
+        self.validator.validate_sensitivity(sensitivity)
         
-        return df
-    
-    def get_member_picked(self, limit: int = 24) -> pd.DataFrame:
-        """Get member picked videos"""
+        all_channels = []
+        offset = 0
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "offset": offset,
+                "limit": page_limit,
+                "query": query,
+                "sensitivity_id": sensitivity
+            }
+            
+            if self.verbose:
+                logger.info(f"Searching channels '{query}': offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/search/channels", payload)
+            if not data or 'channels' not in data or not data['channels']:
+                break
+            
+            channels = []
+            for i, channel_data in enumerate(data['channels'], 1):
+                channel = self.data_processor.parse_channel(channel_data, offset + i)
+                channels.append(asdict(channel))
+            
+            if channels:
+                all_channels.append(pd.DataFrame(channels))
+                total_retrieved += len(channels)
+                offset += len(channels)
+            
+            if len(channels) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_channels:
+            df = pd.concat(all_channels, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Found {len(df)} channels for '{query}'")
+            return df
+        
+        return pd.DataFrame()
+
+    def get_trending_hashtags(self, limit: int = 50, per_page: int = 50) -> pd.DataFrame:
+        """
+        Get trending hashtags with automatic pagination
+        
+        Args:
+            limit: Total number of hashtags to retrieve (default: 50)
+            per_page: Number of hashtags per API call (default: 50, max: 100)
+            
+        Returns:
+            DataFrame with all hashtags
+        """
+        self.validator.validate_limit(per_page, max_limit=100)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
+        
+        all_hashtags = []
+        offset = 0
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "offset": offset,
+                "limit": page_limit
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching trending hashtags: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta9/hashtag/trending/", payload, require_token=False)
+            if not data or 'hashtags' not in data or not data['hashtags']:
+                break
+            
+            hashtags = []
+            for i, tag_data in enumerate(data['hashtags'], 1):
+                hashtag = self.data_processor.parse_hashtag(tag_data, offset + i)
+                hashtags.append(asdict(hashtag))
+            
+            if hashtags:
+                all_hashtags.append(pd.DataFrame(hashtags))
+                total_retrieved += len(hashtags)
+                offset += len(hashtags)
+            
+            if len(hashtags) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_hashtags:
+            df = pd.concat(all_hashtags, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} trending hashtags")
+            return df
+        
+        return pd.DataFrame()
+
+    def get_member_picked(self, limit: int = 50) -> pd.DataFrame:
+        """
+        Get member picked videos
+        
+        Note: This endpoint doesn't support pagination, so it returns up to the API's limit.
+        
+        Args:
+            limit: Maximum number of videos to retrieve (default: 50)
+            
+        Returns:
+            DataFrame with member picked videos
+        """
         self.validator.validate_limit(limit, max_limit=100)
         
         payload = {"limit": limit}
@@ -413,131 +798,6 @@ class BitChuteAPI:
         
         if self.verbose:
             logger.info(f"Retrieved {len(videos)} member picked videos")
-        
-        return df
-    
-    def search_videos(
-        self, 
-        query: str, 
-        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
-        sort: Union[str, SortOrder] = SortOrder.NEW,
-        limit: int = 50, 
-        offset: int = 0
-    ) -> pd.DataFrame:
-        """
-        Search for videos with enhanced parameter validation
-        
-        Args:
-            query: Search query
-            sensitivity: Content sensitivity level
-            sort: Sort order
-            limit: Number of results
-            offset: Pagination offset
-            
-        Returns:
-            DataFrame with search results
-        """
-        # Validate inputs
-        self.validator.validate_search_query(query)
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
-        
-        # Handle enum conversion
-        if isinstance(sensitivity, SensitivityLevel):
-            sensitivity = sensitivity.value
-        if isinstance(sort, SortOrder):
-            sort = sort.value
-            
-        self.validator.validate_sensitivity(sensitivity)
-        self.validator.validate_sort_order(sort)
-        
-        payload = {
-            "offset": offset,
-            "limit": limit,
-            "query": query,
-            "sensitivity_id": sensitivity,
-            "sort": sort
-        }
-        
-        data = self._make_request("beta/search/videos", payload)
-        if not data or 'videos' not in data:
-            return pd.DataFrame()
-        
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, offset + i)
-            videos.append(asdict(video))
-        
-        df = pd.DataFrame(videos)
-        
-        if self.verbose:
-            logger.info(f"Found {len(videos)} videos for '{query}'")
-        
-        return df
-    
-    def search_channels(
-        self, 
-        query: str, 
-        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
-        limit: int = 50, 
-        offset: int = 0
-    ) -> pd.DataFrame:
-        """Search for channels"""
-        self.validator.validate_search_query(query)
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
-        
-        if isinstance(sensitivity, SensitivityLevel):
-            sensitivity = sensitivity.value
-        
-        self.validator.validate_sensitivity(sensitivity)
-        
-        payload = {
-            "offset": offset,
-            "limit": limit,
-            "query": query,
-            "sensitivity_id": sensitivity
-        }
-        
-        data = self._make_request("beta/search/channels", payload)
-        if not data or 'channels' not in data:
-            return pd.DataFrame()
-        
-        channels = []
-        for i, channel_data in enumerate(data['channels'], 1):
-            channel = self.data_processor.parse_channel(channel_data, offset + i)
-            channels.append(asdict(channel))
-        
-        df = pd.DataFrame(channels)
-        
-        if self.verbose:
-            logger.info(f"Found {len(channels)} channels for '{query}'")
-        
-        return df
-    
-    def get_trending_hashtags(self, limit: int = 50, offset: int = 0) -> pd.DataFrame:
-        """Get trending hashtags"""
-        self.validator.validate_limit(limit, max_limit=100)
-        self.validator.validate_offset(offset)
-        
-        payload = {
-            "offset": offset,
-            "limit": limit
-        }
-        
-        data = self._make_request("beta9/hashtag/trending/", payload, require_token=False)
-        if not data or 'hashtags' not in data:
-            return pd.DataFrame()
-        
-        hashtags = []
-        for i, tag_data in enumerate(data['hashtags'], 1):
-            hashtag = self.data_processor.parse_hashtag(tag_data, offset + i)
-            hashtags.append(asdict(hashtag))
-        
-        df = pd.DataFrame(hashtags)
-        
-        if self.verbose:
-            logger.info(f"Retrieved {len(hashtags)} trending hashtags")
         
         return df
     

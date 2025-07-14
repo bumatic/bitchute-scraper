@@ -135,12 +135,16 @@ Quick Start:
     >>> # Initialize API client
     >>> api = bitchute.BitChuteAPI(verbose=True)
     >>> 
-    >>> # Get trending videos
-    >>> trending = api.get_trending_videos('day', limit=20)
+    >>> # Get trending videos (default: 50 videos)
+    >>> trending = api.get_trending_videos('day')
     >>> print(f"Found {len(trending)} trending videos")
     >>> 
-    >>> # Search for videos
-    >>> results = api.search_videos('climate change', limit=50)
+    >>> # Get all recent videos (default: 1000 videos)
+    >>> all_videos = api.get_all_videos()
+    >>> print(f"Found {len(all_videos)} videos")
+    >>> 
+    >>> # Search for videos (default: 50 results)
+    >>> results = api.search_videos('climate change')
     >>> print(f"Found {len(results)} search results")
     >>> 
     >>> # Get video details
@@ -150,14 +154,15 @@ Quick Start:
     >>> # Export data
     >>> from bitchute.utils import DataExporter
     >>> exporter = DataExporter()
-    >>> exporter.export_data(trending, 'trending_videos', ['csv', 'json'])
+    >>> exporter.export_data(all_videos, 'all_videos', ['csv', 'json'])
 
 Features:
     - Fast API-based data collection (10x faster than HTML parsing)
+    - Automatic pagination for all endpoints
     - Comprehensive data models with computed properties
     - Robust error handling and retry logic
     - Built-in rate limiting and request optimization
-    - Token management with caching
+    - Token management with multiple fallback methods
     - Data export to multiple formats (CSV, JSON, Excel, Parquet)
     - Advanced filtering and analysis tools
     - Concurrent processing for bulk operations
@@ -165,14 +170,15 @@ Features:
     - Extensive test coverage
 
 Available Endpoints:
-    - Trending videos (day/week/month)
-    - Popular videos
-    - Recent videos
-    - Short videos
+    - Trending videos (day/week/month) - with pagination
+    - Popular videos - with pagination
+    - Recent videos - with pagination
+    - All videos (convenience method for large datasets)
+    - Short videos - with pagination
     - Member picked videos
-    - Video search with filters
-    - Channel search
-    - Trending hashtags
+    - Video search with filters - with pagination
+    - Channel search - with pagination
+    - Trending hashtags - with pagination
     - Video details with engagement metrics
     - Bulk video processing
 
@@ -189,6 +195,27 @@ Error Handling:
     - RateLimitError: Rate limiting errors
     - TokenExtractionError: Authentication issues
     - NetworkError: Network-related errors
+
+Default Parameters:
+    - All methods default to retrieving 50 items
+    - Pagination is automatic with 50 items per page
+    - Use get_all_videos() for large datasets (default: 1000 videos)
+
+Advanced Usage:
+    >>> # Get 500 videos with custom page size
+    >>> videos = api.get_recent_videos(limit=500, per_page=100)
+    >>> 
+    >>> # Search with specific sort order
+    >>> from bitchute import SortOrder
+    >>> results = api.search_videos('bitcoin', sort=SortOrder.VIEWS, limit=200)
+    >>> 
+    >>> # Filter and analyze data
+    >>> from bitchute.utils import ContentFilter, DataAnalyzer
+    >>> filter = ContentFilter()
+    >>> filtered = filter.filter_by_views(videos, min_views=1000)
+    >>> 
+    >>> analyzer = DataAnalyzer()
+    >>> stats = analyzer.analyze_videos(filtered)
 
 For more information, examples, and documentation:
     https://github.com/bumatic/bitchute-scraper

@@ -105,11 +105,11 @@ class RequestBuilder:
 
 
 class DataProcessor:
-    """Processes and parses API response data"""
+    """Processes and parses API response data with correct field mappings"""
     
     def parse_video(self, data: Dict[str, Any], rank: int = 0) -> Video:
         """
-        Parse video data from API response
+        Parse video data from API response with correct field mapping
         
         Args:
             data: Raw video data from API
@@ -121,27 +121,50 @@ class DataProcessor:
         video = Video()
         
         try:
-            # Basic video information
-            video.id = self._safe_get(data, 'id', '')
-            video.title = self._safe_get(data, 'title', '')
-            video.description = self._safe_get(data, 'description', '')
-            video.view_count = self._safe_int(data.get('view_count', 0))
-            video.duration = self._safe_get(data, 'duration', '')
-            video.upload_date = self._safe_get(data, 'upload_date', 
-                                             data.get('created_at', ''))
-            video.thumbnail_url = self._safe_get(data, 'thumbnail_url', '')
-            video.category = self._safe_get(data, 'category', '')
-            video.sensitivity = self._safe_get(data, 'sensitivity', '')
-            video.is_short = bool(data.get('is_short', False))
+            # Map video_id to id
+            video.id = self._safe_get(data, 'video_id', '')
             
-            # Channel information
-            uploader = data.get('uploader', {})
-            if isinstance(uploader, dict):
-                video.channel_id = self._safe_get(uploader, 'id', '')
-                video.channel_name = self._safe_get(uploader, 'name', '')
+            # Map video_name to title
+            video.title = self._safe_get(data, 'video_name', '')
+            
+            # Description
+            video.description = self._safe_get(data, 'description', '')
+            
+            # View count
+            video.view_count = self._safe_int(data.get('view_count', 0))
+            
+            # Duration
+            video.duration = self._safe_get(data, 'duration', '')
+            
+            # Map date_published to upload_date
+            video.upload_date = self._safe_get(data, 'date_published', '')
+            
+            # Thumbnail
+            video.thumbnail_url = self._safe_get(data, 'thumbnail_url', '')
+            
+            # Category (if present)
+            video.category = self._safe_get(data, 'category', '')
+            
+            # Map sensitivity_id to sensitivity
+            video.sensitivity = self._safe_get(data, 'sensitivity_id', '')
+            
+            # Check for is_short/is_shorts
+            video.is_short = bool(data.get('is_short', data.get('is_shorts', False)))
+            
+            # Channel information from nested channel object
+            channel = data.get('channel', {})
+            if isinstance(channel, dict):
+                video.channel_id = self._safe_get(channel, 'channel_id', '')
+                video.channel_name = self._safe_get(channel, 'channel_name', '')
+            else:
+                # Fallback to old structure if exists
+                uploader = data.get('uploader', {})
+                if isinstance(uploader, dict):
+                    video.channel_id = self._safe_get(uploader, 'id', '')
+                    video.channel_name = self._safe_get(uploader, 'name', '')
             
             # Hashtags processing
-            hashtags = data.get('hashtags', [])
+            hashtags = data.get('hashtags', data.get('tags', []))
             if isinstance(hashtags, list):
                 video.hashtags = [
                     f"#{tag}" if not str(tag).startswith('#') else str(tag) 
@@ -155,8 +178,20 @@ class DataProcessor:
             # URLs
             if video.id:
                 video.video_url = f"https://www.bitchute.com/video/{video.id}/"
+            elif data.get('video_url'):
+                # If relative URL provided, make it absolute
+                relative_url = data.get('video_url', '')
+                if relative_url.startswith('/'):
+                    video.video_url = f"https://www.bitchute.com{relative_url}"
+                else:
+                    video.video_url = relative_url
             
+            # Media URL if present
             video.media_url = self._safe_get(data, 'media_url', '')
+            
+            # Additional fields that might be useful (store in description or create new fields)
+            # state_id could be useful for filtering published vs unpublished videos
+            state_id = self._safe_get(data, 'state_id', '')
             
         except Exception as e:
             logger.warning(f"Error parsing video data: {e}")
@@ -165,7 +200,7 @@ class DataProcessor:
     
     def parse_channel(self, data: Dict[str, Any], rank: int = 0) -> Channel:
         """
-        Parse channel data from API response
+        Parse channel data from API response with correct field mapping
         
         Args:
             data: Raw channel data from API
@@ -177,20 +212,42 @@ class DataProcessor:
         channel = Channel()
         
         try:
-            channel.id = self._safe_get(data, 'id', '')
-            channel.name = self._safe_get(data, 'name', data.get('title', ''))
+            # Map channel_id to id
+            channel.id = self._safe_get(data, 'channel_id', self._safe_get(data, 'id', ''))
+            
+            # Map channel_name to name
+            channel.name = self._safe_get(data, 'channel_name', self._safe_get(data, 'name', data.get('title', '')))
+            
+            # Description
             channel.description = self._safe_get(data, 'description', '')
+            
+            # Stats
             channel.video_count = self._safe_int(data.get('video_count', 0))
             channel.subscriber_count = str(data.get('subscriber_count', ''))
             channel.view_count = self._safe_int(data.get('view_count', 0))
-            channel.created_date = self._safe_get(data, 'created_at', '')
+            
+            # Dates
+            channel.created_date = self._safe_get(data, 'created_at', data.get('date_created', ''))
+            
+            # Category
             channel.category = self._safe_get(data, 'category', '')
+            
+            # Thumbnail
             channel.thumbnail_url = self._safe_get(data, 'thumbnail_url', '')
+            
+            # Verification status
             channel.is_verified = bool(data.get('is_verified', False))
             
             # Build channel URL
             if channel.id:
                 channel.channel_url = f"https://www.bitchute.com/channel/{channel.id}/"
+            elif data.get('channel_url'):
+                # If relative URL provided, make it absolute
+                relative_url = data.get('channel_url', '')
+                if relative_url.startswith('/'):
+                    channel.channel_url = f"https://www.bitchute.com{relative_url}"
+                else:
+                    channel.channel_url = relative_url
             
         except Exception as e:
             logger.warning(f"Error parsing channel data: {e}")
@@ -239,7 +296,6 @@ class DataProcessor:
             return int(float(str(value)))
         except (ValueError, TypeError):
             return 0
-
 
 class PaginationHelper:
     """Helper for handling paginated API responses"""
