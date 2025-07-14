@@ -286,3 +286,4 @@ For more information, visit: https://github.com/bumatic/bitchute-scraper
     recent.add_argument('--limit', '-l', type=int, default=30,
                        help='Number of videos (default: 30)')
     recent.add_argument('--pages', '-p', type=int, default=1,
+                   help='Number of pages to fetch (default: 1)')

@@ -139,19 +139,19 @@ class InputValidator:
             raise ValidationError("Endpoint cannot be empty", "endpoint")
         
         # Basic endpoint format validation
-        if not re.match(r'^[a-zA-Z0-9/_-]+, endpoint):
+        if not re.match(r'^[a-zA-Z0-9/_-]+$', endpoint):
             raise ValidationError(f"Invalid endpoint format: '{endpoint}'", "endpoint")
         
         # Check for common endpoint patterns
         valid_patterns = [
-            r'^beta/videos,
-            r'^beta/search/videos,
-            r'^beta/search/channels,
-            r'^beta/video/counts,
-            r'^beta/video/media,
-            r'^beta/member_liked_videos,
-            r'^beta9/video,
-            r'^beta9/hashtag/trending/
+            r'^beta/videos',
+            r'^beta/search/videos',
+            r'^beta/search/channels',
+            r'^beta/video/counts',
+            r'^beta/video/media',
+            r'^beta/member_liked_videos',
+            r'^beta9/video',
+            r'^beta9/hashtag/trending/'
         ]
         
         if not any(re.match(pattern, endpoint) for pattern in valid_patterns):
