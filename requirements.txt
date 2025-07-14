@@ -36,13 +36,6 @@ psutil>=5.8.0
 # Configuration management (optional)
 pyyaml>=6.0
 
-# Removed dependencies from previous version:
-# - beautifulsoup4 (no HTML parsing needed)
-# - markdownify (no HTML to markdown conversion)
-# - tqdm (simplified progress tracking)
-# - aiohttp, aiofiles (using requests + threading)
-# - lxml (no XML parsing needed)
-
 # Optional extras for enhanced functionality:
 # pip install bitchute-scraper[dev]     # Development tools
 # pip install bitchute-scraper[full]    # All optional features
