@@ -17,6 +17,11 @@ import requests
 import pandas as pd
 from retrying import retry
 
+import asyncio
+import aiohttp
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any, Optional
+
 from .exceptions import (
     BitChuteAPIError, 
     TokenExtractionError, 
@@ -337,6 +342,124 @@ class BitChuteAPI:
             return df
         
         return pd.DataFrame()
+    
+    def get_trending_videos_optimized(
+        self, 
+        timeframe: str = 'day', 
+        limit: int = 50,
+        per_page: int = 50,
+        include_details: bool = False
+    ) -> pd.DataFrame:
+        """
+        Optimized version of get_trending_videos with concurrent detail fetching
+        """
+        import pandas as pd
+        from dataclasses import asdict
+        
+        # Validate inputs
+        self.validator.validate_timeframe(timeframe)
+        self.validator.validate_limit(per_page, max_limit=100)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
+        
+        selection_map = {
+            'day': VideoSelection.TRENDING_DAY.value,
+            'week': VideoSelection.TRENDING_WEEK.value,
+            'month': VideoSelection.TRENDING_MONTH.value
+        }
+        
+        all_videos = []
+        offset = 0
+        total_retrieved = 0
+        
+        # Step 1: Fetch all video data first
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "selection": selection_map[timeframe],
+                "offset": offset,
+                "limit": page_limit,
+                "advertisable": True
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching trending videos: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta/videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(video)
+            
+            if videos:
+                all_videos.extend(videos)
+                total_retrieved += len(videos)
+                offset += len(videos)
+                
+                if self.verbose:
+                    logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
+            
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        # Step 2: Fetch details concurrently if requested
+        if include_details and all_videos:
+            video_ids = [video.id for video in all_videos if video.id]
+            
+            if video_ids:
+                details_manager = OptimizedDetailsManager(self, max_workers=8)
+                
+                try:
+                    # Try async approach first
+                    if self.verbose:
+                        logger.info(f"Fetching details for {len(video_ids)} videos concurrently...")
+                    
+                    start_time = time.time()
+                    details_map = asyncio.run(details_manager.fetch_details_batch_async(video_ids))
+                    
+                    if self.verbose:
+                        duration = time.time() - start_time
+                        logger.info(f"Fetched details in {duration:.2f} seconds")
+                    
+                except Exception as e:
+                    if self.verbose:
+                        logger.warning(f"Async details fetch failed, falling back to threaded: {e}")
+                    
+                    # Fallback to threaded approach
+                    details_map = details_manager.fetch_details_batch_threaded(video_ids)
+                
+                # Apply details to video objects
+                for video in all_videos:
+                    if video.id in details_map:
+                        details = details_map[video.id]
+                        video.like_count = details.get('like_count', 0)
+                        video.dislike_count = details.get('dislike_count', 0)
+                        # Update view count if higher
+                        new_view_count = details.get('view_count', video.view_count)
+                        if new_view_count > video.view_count:
+                            video.view_count = new_view_count
+        
+        # Step 3: Convert to DataFrame
+        if all_videos:
+            video_dicts = [asdict(video) for video in all_videos]
+            df = pd.DataFrame(video_dicts)
+            
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} trending videos ({timeframe})")
+            
+            return df
+        
+        return pd.DataFrame()
+
 
     def get_popular_videos(self, limit: int = 500, per_page: int = 50) -> pd.DataFrame:
         """
@@ -1185,3 +1308,135 @@ class BitChuteAPI:
             self.token_manager.cleanup()
         if hasattr(self, 'session'):
             self.session.close()
+
+
+class OptimizedDetailsManager:
+    """
+    Optimized manager for fetching video details with concurrent processing
+    """
+    
+    def __init__(self, api_client, max_workers: int = 10):
+        self.api_client = api_client
+        self.max_workers = max_workers
+        self.session = None
+        
+    async def _fetch_video_details_async(self, session: aiohttp.ClientSession, video_id: str) -> Dict[str, Any]:
+        """Fetch video details asynchronously"""
+        try:
+            # Get counts
+            counts_payload = {"video_id": video_id}
+            counts_url = f"{self.api_client.base_url}/beta/video/counts"
+            
+            async with session.post(counts_url, json=counts_payload) as response:
+                if response.status == 200:
+                    counts_data = await response.json()
+                    return {
+                        'video_id': video_id,
+                        'like_count': int(counts_data.get('like_count', 0) or 0),
+                        'dislike_count': int(counts_data.get('dislike_count', 0) or 0),
+                        'view_count': int(counts_data.get('view_count', 0) or 0)
+                    }
+                    
+        except Exception as e:
+            logger.warning(f"Failed to fetch details for {video_id}: {e}")
+            
+        return {'video_id': video_id}
+    
+    async def fetch_details_batch_async(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch video details for multiple videos concurrently using async"""
+        if not video_ids:
+            return {}
+        
+        # Create session with proper headers
+        headers = self.api_client.session.headers.copy()
+        connector = aiohttp.TCPConnector(limit=self.max_workers)
+        timeout = aiohttp.ClientTimeout(total=30)
+        
+        async with aiohttp.ClientSession(
+            headers=headers,
+            connector=connector,
+            timeout=timeout
+        ) as session:
+            # Create tasks for all video IDs
+            tasks = [
+                self._fetch_video_details_async(session, video_id)
+                for video_id in video_ids
+            ]
+            
+            # Execute with controlled concurrency
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            details_map = {}
+            for result in results:
+                if isinstance(result, dict) and 'video_id' in result:
+                    details_map[result['video_id']] = result
+                    
+            return details_map
+    
+    def fetch_details_batch_threaded(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch video details using thread pool (fallback method)"""
+        if not video_ids:
+            return {}
+        
+        details_map = {}
+        
+        def fetch_single_detail(video_id: str) -> Dict[str, Any]:
+            try:
+                payload = {"video_id": video_id}
+                data = self.api_client._make_request("beta/video/counts", payload)
+                if data:
+                    return {
+                        'video_id': video_id,
+                        'like_count': int(data.get('like_count', 0) or 0),
+                        'dislike_count': int(data.get('dislike_count', 0) or 0),
+                        'view_count': int(data.get('view_count', 0) or 0)
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to fetch details for {video_id}: {e}")
+            
+            return {'video_id': video_id}
+        
+        # Use ThreadPoolExecutor for concurrent requests
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_id = {
+                executor.submit(fetch_single_detail, video_id): video_id
+                for video_id in video_ids
+            }
+            
+            for future in as_completed(future_to_id):
+                result = future.result()
+                if 'video_id' in result:
+                    details_map[result['video_id']] = result
+        
+        return details_map
+
+
+class VideoDetailsCache:
+    """Simple cache for video details to avoid redundant requests"""
+    
+    def __init__(self, ttl: int = 3600):  # 1 hour TTL
+        self.cache = {}
+        self.timestamps = {}
+        self.ttl = ttl
+    
+    def get(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached details if valid"""
+        if video_id in self.cache:
+            if time.time() - self.timestamps[video_id] < self.ttl:
+                return self.cache[video_id]
+            else:
+                # Remove expired entry
+                del self.cache[video_id]
+                del self.timestamps[video_id]
+        return None
+    
+    def set(self, video_id: str, details: Dict[str, Any]):
+        """Cache video details"""
+        self.cache[video_id] = details
+        self.timestamps[video_id] = time.time()
+    
+    def clear(self):
+        """Clear all cached entries"""
+        self.cache.clear()
+        self.timestamps.clear()
