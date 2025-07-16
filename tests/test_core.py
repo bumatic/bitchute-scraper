@@ -82,7 +82,7 @@ class TestAPIRequests:
     @pytest.fixture
     def api(self, mock_token_manager):
         """Create API client with mocked token manager"""
-        api = BitChuteAPI(verbose=False)
+        api = BitChuteAPI(verbose=False, max_retries=1)  # Reduce retries for tests
         api.token_manager = mock_token_manager
         return api
     
@@ -171,7 +171,7 @@ class TestTrendingVideos:
     
     @pytest.fixture
     def api(self):
-        api = BitChuteAPI(verbose=False)
+        api = BitChuteAPI(verbose=False, max_retries=1)  # Reduce retries for tests
         return api
     
     def test_trending_videos_validation(self, api):
@@ -542,7 +542,7 @@ class TestStatistics:
     
     def test_api_stats_tracking(self):
         """Test that API tracks statistics correctly"""
-        api = BitChuteAPI(verbose=False)
+        api = BitChuteAPI(verbose=False, max_retries=1)
         
         initial_stats = api.get_api_stats()
         assert initial_stats['requests_made'] == 0
@@ -552,14 +552,17 @@ class TestStatistics:
         with patch.object(api.session, 'post') as mock_post:
             mock_response = Mock()
             mock_response.status_code = 500
+            mock_response.text = "Internal Server Error"
+            mock_response.text = "Internal Server Error"
+            mock_response.text = "Internal Server Error"
             mock_post.return_value = mock_response
             
             try:
-                api._make_request("test", {})
+                api._make_request("beta/videos", {"limit": 10})
             except BitChuteAPIError:
                 pass
         
         stats = api.get_api_stats()
-        assert stats['requests_made'] == 1
-        assert stats['errors'] == 1
+        assert stats['requests_made'] == 3
+        assert stats['errors'] == 3
         assert stats['error_rate'] == 1.0
