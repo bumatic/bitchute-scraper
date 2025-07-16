@@ -45,13 +45,13 @@ class AuthenticationError(BitChuteAPIError):
     def __init__(self, message: str = "Authentication failed"):
         super().__init__(message, 401)
 
-
 class NetworkError(BitChuteAPIError):
     """Exception raised for network-related errors"""
     
     def __init__(self, message: str = "Network error occurred"):
         super().__init__(message)
-
+        # Store original exception for chaining
+        self.original_exception = None
 
 class DataProcessingError(BitChuteAPIError):
     """Exception raised during data processing"""

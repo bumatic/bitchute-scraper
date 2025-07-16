@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Dict, List, Any, Optional, Union
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 import concurrent.futures
 
@@ -364,18 +364,7 @@ class PaginationHelper:
         per_page: int = 50,
         **kwargs
     ) -> pd.DataFrame:
-        """
-        Get multiple pages of data from an API method
-        
-        Args:
-            api_method: API method to call
-            max_pages: Maximum pages to retrieve
-            per_page: Items per page
-            **kwargs: Additional arguments for API method
-            
-        Returns:
-            Combined DataFrame from all pages
-        """
+        """Get multiple pages of data from an API method"""
         all_data = []
         
         for page in range(max_pages):
@@ -389,11 +378,17 @@ class PaginationHelper:
                     df = api_method(limit=per_page, **kwargs)
                 
                 if df.empty:
+                    logger.info(f"Page {page + 1}: No data returned, stopping pagination")
                     break
                 
                 all_data.append(df)
                 
                 logger.info(f"Page {page + 1}: {len(df)} items")
+                
+                # Check if we got fewer items than requested (end of data)
+                if len(df) < per_page:
+                    logger.info(f"Got {len(df)} items, expected {per_page}. End of data reached.")
+                    break
                 
                 # Small delay between requests
                 time.sleep(0.5)
@@ -534,7 +529,7 @@ class DataAnalyzer:
         
         analysis = {
             'total_videos': len(df),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
         # View count analysis

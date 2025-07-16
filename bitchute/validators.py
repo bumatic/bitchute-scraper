@@ -17,8 +17,8 @@ class InputValidator:
     VALID_SELECTIONS = ['trending-day', 'trending-week', 'trending-month', 'popular', 'all']
     
     # Regex patterns
-    VIDEO_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{8,20}$')
-    CHANNEL_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{8,20}$')
+    VIDEO_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{6,20}$')  # Changed from 8-20 to 6-20
+    CHANNEL_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{6,20}$')  # Changed from 8-20 to 6-20
     
     def validate_limit(self, limit: int, max_limit: int = 100, min_limit: int = 1):
         """Validate limit parameter"""
@@ -95,8 +95,9 @@ class InputValidator:
         if len(query) > 100:
             raise ValidationError(f"Query too long (max 100 characters), got {len(query)}", "query")
         
-        # Check for suspicious patterns
-        if query.count(' ') > 20:
+        # Check for suspicious patterns - only count non-whitespace bounded spaces
+        space_count = query.count(' ')
+        if space_count > 20:
             raise ValidationError("Query contains too many spaces", "query")
     
     def validate_video_id(self, video_id: str):

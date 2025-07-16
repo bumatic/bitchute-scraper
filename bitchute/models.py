@@ -4,8 +4,7 @@ BitChute Scraper Data Models
 
 from dataclasses import dataclass, field
 from typing import List, Optional
-from datetime import datetime
-
+from datetime import datetime, timezone
 
 @dataclass
 class Video:
@@ -61,7 +60,7 @@ class Video:
     def __post_init__(self):
         """Initialize computed fields"""
         if not self.scrape_timestamp:
-            self.scrape_timestamp = datetime.utcnow().timestamp()
+            self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
         if not self.video_url and self.id:
             self.video_url = f"https://www.bitchute.com/video/{self.id}/"
@@ -194,7 +193,7 @@ class Channel:
     def __post_init__(self):
         """Initialize computed fields"""
         if not self.scrape_timestamp:
-            self.scrape_timestamp = datetime.utcnow().timestamp()
+            self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
         if not self.channel_url and self.id:
             self.channel_url = f"https://www.bitchute.com/channel/{self.id}/"
@@ -273,7 +272,7 @@ class Hashtag:
     def __post_init__(self):
         """Initialize computed fields"""
         if not self.scrape_timestamp:
-            self.scrape_timestamp = datetime.utcnow().timestamp()
+            self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
         if not self.url and self.name:
             clean_name = self.name.lstrip('#')
@@ -330,7 +329,7 @@ class SearchResult:
     def __post_init__(self):
         """Initialize timestamp"""
         if not self.search_timestamp:
-            self.search_timestamp = datetime.utcnow().timestamp()
+            self.search_timestamp = datetime.now(timezone.utc).timestamp()
     
     @property
     def has_results(self) -> bool:
@@ -363,7 +362,7 @@ class APIStats:
     def __post_init__(self):
         """Initialize timestamps"""
         if not self.session_start_time:
-            self.session_start_time = datetime.utcnow().timestamp()
+            self.session_start_time = datetime.now(timezone.utc).timestamp()
     
     @property
     def success_rate(self) -> float:
@@ -390,7 +389,7 @@ class APIStats:
     @property
     def session_duration(self) -> float:
         """Session duration in seconds"""
-        current_time = self.last_request_time if self.last_request_time else datetime.utcnow().timestamp()
+        current_time = self.last_request_time if self.last_request_time else datetime.now(timezone.utc).timestamp()
         return current_time - self.session_start_time
     
     def to_dict(self) -> dict:

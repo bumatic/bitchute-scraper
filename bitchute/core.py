@@ -165,21 +165,7 @@ class BitChuteAPI:
         payload: Dict[str, Any], 
         require_token: bool = True
     ) -> Optional[Dict[str, Any]]:
-        """
-        Make API request with enhanced error handling and retries
-        
-        Args:
-            endpoint: API endpoint
-            payload: Request payload
-            require_token: Whether authentication token is required
-            
-        Returns:
-            Response data or None if failed
-            
-        Raises:
-            BitChuteAPIError: For API-related errors
-            RateLimitError: When rate limited
-        """
+        """Make API request with enhanced error handling and retries"""
         # Validate inputs
         self.validator.validate_endpoint(endpoint)
         self.validator.validate_payload(payload)
@@ -245,8 +231,24 @@ class BitChuteAPI:
             raise BitChuteAPIError(error_msg, response.status_code)
             
         except requests.exceptions.RequestException as e:
+            self.stats['requests_made'] += 1
             self.stats['errors'] += 1
+            self.stats['last_request_time'] = time.time()
+            
             error_msg = f"Request failed: {endpoint} - {str(e)}"
+            
+            if self.verbose:
+                logger.error(error_msg)
+            
+            raise BitChuteAPIError(error_msg) from e
+        
+        except Exception as e:
+            # Handle any other exceptions and convert to BitChuteAPIError
+            self.stats['requests_made'] += 1
+            self.stats['errors'] += 1
+            self.stats['last_request_time'] = time.time()
+            
+            error_msg = f"Unexpected error: {endpoint} - {str(e)}"
             
             if self.verbose:
                 logger.error(error_msg)
@@ -524,16 +526,7 @@ class BitChuteAPI:
         return pd.DataFrame()
 
     def get_recent_videos(self, limit: int = 50, per_page: int = 50) -> pd.DataFrame:
-        """
-        Get recent videos (all videos) with automatic pagination
-        
-        Args:
-            limit: Total number of videos to retrieve (default: 50)
-            per_page: Number of videos per API call (default: 50, max: 100)
-            
-        Returns:
-            DataFrame with all requested videos
-        """
+        """Get recent videos (all videos) with automatic pagination"""
         self.validator.validate_limit(per_page, max_limit=100)
         
         if limit < 1:
@@ -559,7 +552,9 @@ class BitChuteAPI:
             
             data = self._make_request("beta/videos", payload)
             if not data or 'videos' not in data or not data['videos']:
-                break
+                if self.verbose:
+                    logger.info(f"No more videos available at offset {offset}")
+                break  # No more videos available
             
             videos = []
             for i, video_data in enumerate(data['videos'], 1):
@@ -574,7 +569,10 @@ class BitChuteAPI:
                 if self.verbose:
                     logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
             
+            # Check if we got fewer videos than requested (end of data)
             if len(videos) < page_limit:
+                if self.verbose:
+                    logger.info(f"Got {len(videos)} videos, expected {page_limit}. End of data reached.")
                 break
             
             if total_retrieved < limit:
@@ -997,12 +995,7 @@ class BitChuteAPI:
 
 
     def _enrich_video_details(self, video: Video):
-        """
-        Enrich video object with additional details from other endpoints
-        
-        Args:
-            video: Video object to enrich
-        """
+        """Enrich video object with additional details from other endpoints"""
         try:
             # Get counts
             counts_data = self._make_request("beta/video/counts", {"video_id": video.id})
@@ -1026,6 +1019,7 @@ class BitChuteAPI:
         except Exception as e:
             if self.verbose:
                 logger.warning(f"Failed to enrich video {video.id}: {e}")
+
 
     def _parse_video_details(self, data: Dict[str, Any]) -> Video:
         """Parse video details from beta9/video endpoint"""
