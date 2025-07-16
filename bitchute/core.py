@@ -167,6 +167,11 @@ class BitChuteAPI:
     ) -> Optional[Dict[str, Any]]:
         """Make API request with enhanced error handling and retries"""
         # Validate inputs
+        
+        print(self.stats['requests_made'])
+        print(self.stats['errors'])
+        print()
+        
         self.validator.validate_endpoint(endpoint)
         self.validator.validate_payload(payload)
         
@@ -196,7 +201,7 @@ class BitChuteAPI:
             # Update statistics
             self.stats['requests_made'] += 1
             self.stats['last_request_time'] = time.time()
-            
+
             # Handle different response codes
             if response.status_code == 200:
                 return response.json()
@@ -230,6 +235,9 @@ class BitChuteAPI:
             
             raise BitChuteAPIError(error_msg, response.status_code)
             
+        except RateLimitError:
+            # Re-raise RateLimitError without wrapping
+            raise
         except requests.exceptions.RequestException as e:
             self.stats['requests_made'] += 1
             self.stats['errors'] += 1
@@ -244,6 +252,10 @@ class BitChuteAPI:
         
         except Exception as e:
             # Handle any other exceptions and convert to BitChuteAPIError
+            # But don't wrap our own exceptions
+            if isinstance(e, (BitChuteAPIError, RateLimitError, ValidationError)):
+                raise
+                
             self.stats['requests_made'] += 1
             self.stats['errors'] += 1
             self.stats['last_request_time'] = time.time()
@@ -1283,7 +1295,6 @@ class BitChuteAPI:
     def get_api_stats(self) -> Dict[str, Any]:
         """Get API usage statistics"""
         uptime = time.time() - self.stats['last_request_time'] if self.stats['last_request_time'] else 0
-        
         return {
             'requests_made': self.stats['requests_made'],
             'cache_hits': self.stats['cache_hits'],

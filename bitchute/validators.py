@@ -99,6 +99,8 @@ class InputValidator:
         space_count = query.count(' ')
         if space_count > 20:
             raise ValidationError("Query contains too many spaces", "query")
+        #if query.count(' ') > 20:
+        #    raise ValidationError("Search query has too many spaces")
     
     def validate_video_id(self, video_id: str):
         """Validate video ID format"""

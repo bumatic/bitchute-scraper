@@ -75,11 +75,10 @@ class TokenManager:
                 if expires_at > time.time() + 1800:  # 30 minutes buffer
                     self.token = data.get('token')
                     self.expires_at = expires_at
-                    
                     if self.verbose:
                         logger.info("Loaded cached API token")
-                        
         except Exception as e:
+            self.token = None
             if self.verbose:
                 logger.warning(f"Failed to load cached token: {e}")
     
