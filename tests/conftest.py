@@ -74,13 +74,19 @@ def setup_test_environment():
     os.environ.pop('BITCHUTE_TEST_MODE', None)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_token_manager():
     """Automatically mock token manager for all tests"""
     with patch('bitchute.core.TokenManager') as mock_tm:
         instance = mock_tm.return_value
-        instance.get_token.return_value = "test_token_123456789012345678"
+        instance.get_token.return_value = "abcd1234efgh5678ijkl9012mnop"  # Valid 28-char token
         instance.has_valid_token.return_value = True
+        instance.invalidate_token.return_value = None
+        instance.cleanup.return_value = None
+        instance.invalidate_token.return_value = None
+        instance.cleanup.return_value = None
+        instance.invalidate_token.return_value = None
+        instance.cleanup.return_value = None
         yield instance
 
 

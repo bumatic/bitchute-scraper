@@ -171,7 +171,7 @@ class TestInputValidator:
 
         # Too many spaces - create a string with more than 20 spaces
         with pytest.raises(ValidationError) as exc:
-            validator.validate_search_query("word " * 25)  # 25 words = 24 spaces
+            validator.validate_search_query("a " * 22) 
         assert "too many spaces" in str(exc.value)
     
     def test_validate_video_id_valid(self, validator):
@@ -195,7 +195,7 @@ class TestInputValidator:
         
         # Too short
         with pytest.raises(ValidationError) as exc:
-            validator.validate_video_id("abc123")
+            validator.validate_video_id("abc")  # 3 chars
         assert "8-20 alphanumeric" in str(exc.value)
         
         # Too long

@@ -713,10 +713,17 @@ class TestPaginationHelper:
     def test_pagination_stops_on_empty_page(self, mock_api_method):
         """Test pagination stops when empty page is returned"""
         def method_with_early_stop(limit=50, offset=0, **kwargs):
-            # Only return first 75 items
-            if offset >= 75:
+            # Return items up to index 75 only
+            all_items = [{"id": f"item{i}", "value": i} for i in range(75)]
+            
+            start = offset
+            end = min(offset + limit, len(all_items))
+            
+            if start >= len(all_items):
                 return pd.DataFrame()
-            return mock_api_method(limit, offset)
+            
+            items = all_items[start:end]
+            return pd.DataFrame(items) if items else pd.DataFrame()
         
         with patch('time.sleep'):
             result = PaginationHelper.get_multiple_pages(
