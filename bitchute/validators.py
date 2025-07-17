@@ -151,6 +151,7 @@ class InputValidator:
             r'^beta/search/videos',
             r'^beta/search/channels',
             r'^beta/video/counts',
+            r'^beta/hashtag/videos',
             r'^beta/video/media',
             r'^beta/video/comments',
             r'^beta/member_liked_videos',

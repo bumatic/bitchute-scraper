@@ -257,17 +257,7 @@ class BitChuteAPI:
 
     def _fetch_details_parallel(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """
-        Unified parallel details fetching for all video functions
-        
-        Strategy: 2-batch approach for optimal performance
-        1. Fetch all counts first (like_count, dislike_count, view_count)
-        2. Fetch all media URLs second (media_url, media_type)
-        
-        Args:
-            video_ids: List of video IDs to enrich
-            
-        Returns:
-            Dict mapping video_id to details dict with all fields
+        FIXED: Unified parallel details fetching with TRUE parallel execution
         """
         if not video_ids:
             return {}
@@ -289,9 +279,9 @@ class BitChuteAPI:
                 'media_type': ''
             }
         
-        # BATCH 1: Fetch counts for all videos
+        # BATCH 1: Fetch counts for all videos IN PARALLEL
         if self.verbose:
-            logger.info("Batch 1: Fetching counts...")
+            logger.info("Batch 1: Fetching counts in parallel...")
         
         def fetch_counts(video_id: str) -> Dict[str, Any]:
             """Fetch counts for a single video"""
@@ -311,13 +301,15 @@ class BitChuteAPI:
             
             return {'video_id': video_id}
         
-        # Execute counts batch
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        # FIXED: Execute all counts in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(video_ids))) as executor:
+            # Submit all tasks at once
             future_to_id = {
                 executor.submit(fetch_counts, video_id): video_id
                 for video_id in video_ids
             }
             
+            # Collect results as they complete
             for future in as_completed(future_to_id):
                 result = future.result()
                 if result and 'video_id' in result:
@@ -327,9 +319,9 @@ class BitChuteAPI:
                         if key in result:
                             details_map[video_id][key] = result[key]
         
-        # BATCH 2: Fetch media URLs for all videos
+        # BATCH 2: Fetch media URLs for all videos IN PARALLEL
         if self.verbose:
-            logger.info("Batch 2: Fetching media URLs...")
+            logger.info("Batch 2: Fetching media URLs in parallel...")
         
         def fetch_media(video_id: str) -> Dict[str, Any]:
             """Fetch media URL for a single video"""
@@ -348,13 +340,15 @@ class BitChuteAPI:
             
             return {'video_id': video_id}
         
-        # Execute media batch
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        # FIXED: Execute all media requests in parallel
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(video_ids))) as executor:
+            # Submit all tasks at once
             future_to_id = {
                 executor.submit(fetch_media, video_id): video_id
                 for video_id in video_ids
             }
             
+            # Collect results as they complete  
             for future in as_completed(future_to_id):
                 result = future.result()
                 if result and 'video_id' in result:
@@ -450,7 +444,7 @@ class BitChuteAPI:
         return df
 
     # ================================
-    # STANDARDIZED VIDEO FUNCTIONS
+    # Get Platform Recommendations
     # ================================
 
     def get_trending_videos(
@@ -461,14 +455,6 @@ class BitChuteAPI:
     ) -> pd.DataFrame:
         """
         Get trending videos with optional parallel detail fetching
-        
-        Args:
-            timeframe: 'day', 'week', or 'month'
-            limit: Total number of videos to retrieve (default: 50)
-            include_details: Fetch like/dislike counts and media URLs (default: False)
-            
-        Returns:
-            DataFrame with all requested videos and consistent schema
         """
         # Validate inputs
         self.validator.validate_timeframe(timeframe)
@@ -487,7 +473,7 @@ class BitChuteAPI:
         total_retrieved = 0
         
         while total_retrieved < limit:
-            # Calculate how many to fetch this page
+            # FIXED: Calculate how many to fetch this page
             remaining = limit - total_retrieved
             page_limit = min(per_page, remaining)
             
@@ -503,26 +489,34 @@ class BitChuteAPI:
             
             data = self._make_request("beta/videos", payload)
             if not data or 'videos' not in data or not data['videos']:
-                break  # No more videos available
+                break
             
             videos = []
             for i, video_data in enumerate(data['videos'], 1):
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
+                
+                # FIXED: Stop when we reach the exact limit
+                if len(all_videos) + len(videos) >= limit:
+                    videos = videos[:limit - len(all_videos)]
+                    break
             
             if videos:
                 all_videos.extend(videos)
-                total_retrieved += len(videos)
+                total_retrieved = len(all_videos)  # FIXED: Use actual count
                 offset += len(videos)
                 
                 if self.verbose:
                     logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
             
+            # FIXED: Check if we reached the exact limit
+            if total_retrieved >= limit:
+                break
+            
             # Check if we got fewer videos than requested (end of data)
             if len(videos) < page_limit:
                 break
             
-            # Small delay between requests
             if total_retrieved < limit:
                 time.sleep(self.rate_limiter.rate_limit)
         
@@ -850,6 +844,168 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
+    def get_trending_hashtags(self, limit: int = 50) -> pd.DataFrame:
+        """
+        Get trending hashtags with automatic pagination
+        
+        Args:
+            limit: Total number of hashtags to retrieve (default: 50)
+            
+        Returns:
+            DataFrame with all hashtags
+        """
+        self.validator.validate_limit(limit, max_limit=1000)
+        
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
+        
+        all_hashtags = []
+        offset = 0
+        per_page = 50
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "offset": offset,
+                "limit": page_limit
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching trending hashtags: offset={offset}, limit={page_limit}")
+            
+            data = self._make_request("beta9/hashtag/trending/", payload, require_token=False)
+            if not data or 'hashtags' not in data or not data['hashtags']:
+                break
+            
+            hashtags = []
+            for i, tag_data in enumerate(data['hashtags'], 1):
+                hashtag = self.data_processor.parse_hashtag(tag_data, offset + i)
+                hashtags.append(asdict(hashtag))
+            
+            if hashtags:
+                all_hashtags.append(pd.DataFrame(hashtags))
+                total_retrieved += len(hashtags)
+                offset += len(hashtags)
+            
+            if len(hashtags) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        if all_hashtags:
+            df = pd.concat(all_hashtags, ignore_index=True)
+            if self.verbose:
+                logger.info(f"Retrieved {len(df)} trending hashtags")
+            return df
+        
+        return pd.DataFrame()
+    def get_videos_by_hashtag(
+        self, 
+        hashtag: str, 
+        limit: int = 50, 
+        include_details: bool = False
+    ) -> pd.DataFrame:
+        """
+        Get videos for a specific hashtag with optional parallel detail fetching
+        
+        Args:
+            hashtag: Hashtag to search for (accepts "#trump" or "trump")
+            limit: Total number of videos to retrieve (default: 50)
+            include_details: Fetch like/dislike counts and media URLs (default: False)
+            
+        Returns:
+            DataFrame with all videos for the hashtag and consistent schema
+        """
+        # Validate and clean hashtag
+        if not hashtag or not isinstance(hashtag, str):
+            raise ValidationError("Hashtag must be a non-empty string", "hashtag")
+        
+        # Clean hashtag: remove # prefix for API call
+        clean_hashtag = hashtag.lstrip('#').strip()
+        if not clean_hashtag:
+            raise ValidationError("Hashtag cannot be empty after cleaning", "hashtag")
+        
+        # Validate hashtag format (alphanumeric, underscore, hyphen)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', clean_hashtag):
+            raise ValidationError(f"Invalid hashtag format: '{hashtag}'", "hashtag")
+        
+        if self.verbose:
+            logger.info(f"Fetching videos for hashtag: #{clean_hashtag}")
+        
+        # Fetch videos for hashtag with pagination
+        all_videos = []
+        offset = 0
+        per_page = 50
+        total_retrieved = 0
+        
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            payload = {
+                "hashtag": clean_hashtag,
+                "offset": offset,
+                "limit": page_limit
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching hashtag videos: offset={offset}, limit={page_limit}")
+            
+            # Use hashtag-specific endpoint
+            '''beta/hashtag/videos'''
+            data = self._make_request("beta/hashtag/videos", payload, require_token=False)
+            if not data or 'videos' not in data or not data['videos']:
+                if self.verbose:
+                    logger.info(f"No more videos found for hashtag #{clean_hashtag} at offset {offset}")
+                break
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(video)
+            
+            if videos:
+                all_videos.extend(videos)
+                total_retrieved += len(videos)
+                offset += len(videos)
+                
+                if self.verbose:
+                    logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
+            
+            # Check if we got fewer videos than requested (end of data)
+            if len(videos) < page_limit:
+                break
+            
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+        
+        # Parallel detail fetching if requested
+        if include_details and all_videos:
+            video_ids = [video.id for video in all_videos if video.id]
+            if video_ids:
+                details_map = self._fetch_details_parallel(video_ids)
+                self._apply_details_to_videos(all_videos, details_map)
+        
+        # Convert to DataFrame with consistent schema
+        if all_videos:
+            video_dicts = [asdict(video) for video in all_videos]
+            df = pd.DataFrame(video_dicts)
+            df = self._ensure_consistent_schema(df)
+            
+            if self.verbose:
+                detail_status = "with details" if include_details else "without details"
+                logger.info(f"Retrieved {len(df)} videos for #{clean_hashtag} {detail_status}")
+            
+            return df
+        
+        # Return empty DataFrame with consistent schema
+        return self._ensure_consistent_schema(pd.DataFrame())
+
     # ================================
     # SEARCH FUNCTIONS
     # ================================
@@ -933,22 +1089,33 @@ class BitChuteAPI:
         # Return empty DataFrame with consistent schema
         return self._ensure_consistent_schema(pd.DataFrame())
 
-    def get_trending_hashtags(self, limit: int = 50) -> pd.DataFrame:
+    def search_channels(
+        self, 
+        query: str, 
+        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
+        limit: int = 50
+    ) -> pd.DataFrame:
         """
-        Get trending hashtags with automatic pagination
+        Search for channels with automatic pagination
         
         Args:
-            limit: Total number of hashtags to retrieve (default: 50)
+            query: Search query
+            sensitivity: Content sensitivity level
+            limit: Total number of results to retrieve (default: 50)
             
         Returns:
-            DataFrame with all hashtags
+            DataFrame with all search results
         """
-        self.validator.validate_limit(limit, max_limit=1000)
-        
+        self.validator.validate_search_query(query)
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
         
-        all_hashtags = []
+        if isinstance(sensitivity, SensitivityLevel):
+            sensitivity = sensitivity.value
+        
+        self.validator.validate_sensitivity(sensitivity)
+        
+        all_channels = []
         offset = 0
         per_page = 50
         total_retrieved = 0
@@ -959,39 +1126,42 @@ class BitChuteAPI:
             
             payload = {
                 "offset": offset,
-                "limit": page_limit
+                "limit": page_limit,
+                "query": query,
+                "sensitivity_id": sensitivity
             }
             
             if self.verbose:
-                logger.info(f"Fetching trending hashtags: offset={offset}, limit={page_limit}")
+                logger.info(f"Searching channels '{query}': offset={offset}, limit={page_limit}")
             
-            data = self._make_request("beta9/hashtag/trending/", payload, require_token=False)
-            if not data or 'hashtags' not in data or not data['hashtags']:
+            data = self._make_request("beta/search/channels", payload)
+            if not data or 'channels' not in data or not data['channels']:
                 break
             
-            hashtags = []
-            for i, tag_data in enumerate(data['hashtags'], 1):
-                hashtag = self.data_processor.parse_hashtag(tag_data, offset + i)
-                hashtags.append(asdict(hashtag))
+            channels = []
+            for i, channel_data in enumerate(data['channels'], 1):
+                channel = self.data_processor.parse_channel(channel_data, offset + i)
+                channels.append(asdict(channel))
             
-            if hashtags:
-                all_hashtags.append(pd.DataFrame(hashtags))
-                total_retrieved += len(hashtags)
-                offset += len(hashtags)
+            if channels:
+                all_channels.append(pd.DataFrame(channels))
+                total_retrieved += len(channels)
+                offset += len(channels)
             
-            if len(hashtags) < page_limit:
+            if len(channels) < page_limit:
                 break
             
             if total_retrieved < limit:
                 time.sleep(self.rate_limiter.rate_limit)
         
-        if all_hashtags:
-            df = pd.concat(all_hashtags, ignore_index=True)
+        if all_channels:
+            df = pd.concat(all_channels, ignore_index=True)
             if self.verbose:
-                logger.info(f"Retrieved {len(df)} trending hashtags")
+                logger.info(f"Found {len(df)} channels for '{query}'")
             return df
         
         return pd.DataFrame()
+
 
     # ================================
     # CHANNEL FUNCTIONS
