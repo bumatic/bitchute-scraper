@@ -23,12 +23,11 @@ from .utils import (
     PaginationHelper,
     BulkProcessor,
     DataExporter,
-    DataAnalyzer,
     ContentFilter,
     CacheManager
 )
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"  # Bump version for breaking changes
 __author__ = "Marcus Burkhardt"
 __email__ = "marcus.burkhardt@gmail.com"
 __description__ = "A modern, API-based package to scrape BitChute platform data."

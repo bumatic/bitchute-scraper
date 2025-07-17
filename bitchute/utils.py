@@ -1,5 +1,5 @@
 """
-BitChute Scraper Utilities Module
+BitChute Scraper Utilities Module - Cleaned and Simplified
 """
 
 import time
@@ -353,7 +353,7 @@ class DataProcessor:
         except (ValueError, TypeError):
             return 0
 
-            
+
 class PaginationHelper:
     """Helper for handling paginated API responses"""
     
@@ -415,7 +415,9 @@ class BulkProcessor:
         include_media: bool = False
     ) -> List[Video]:
         """
-        Get details for multiple videos concurrently
+        Get details for multiple videos concurrently (External API - users can import this)
+        
+        Note: Internal functions use the unified _fetch_details_parallel() method
         
         Args:
             api_client: BitChute API client instance
@@ -510,113 +512,6 @@ class DataExporter:
         return exported
 
 
-class DataAnalyzer:
-    """Analyze and summarize scraped data"""
-    
-    @staticmethod
-    def analyze_videos(df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Analyze video data and return insights
-        
-        Args:
-            df: DataFrame with video data
-            
-        Returns:
-            Dictionary with analysis results
-        """
-        if df.empty:
-            return {'error': 'No data to analyze'}
-        
-        analysis = {
-            'total_videos': len(df),
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-        
-        # View count analysis
-        if 'view_count' in df.columns:
-            view_counts = df['view_count'].dropna()
-            if not view_counts.empty:
-                analysis['views'] = {
-                    'total': int(view_counts.sum()),
-                    'average': float(view_counts.mean()),
-                    'median': float(view_counts.median()),
-                    'max': int(view_counts.max()),
-                    'min': int(view_counts.min())
-                }
-        
-        # Channel analysis
-        if 'channel_name' in df.columns:
-            channel_counts = df['channel_name'].value_counts()
-            analysis['top_channels'] = channel_counts.head(10).to_dict()
-            analysis['unique_channels'] = len(channel_counts)
-        
-        # Category analysis
-        if 'category' in df.columns:
-            category_counts = df['category'].value_counts()
-            analysis['categories'] = category_counts.to_dict()
-        
-        # Duration analysis
-        if 'duration' in df.columns:
-            durations = df['duration'].dropna()
-            if not durations.empty:
-                # Convert duration strings to seconds for analysis
-                duration_seconds = []
-                for duration in durations:
-                    try:
-                        seconds = DataAnalyzer._parse_duration(duration)
-                        if seconds > 0:
-                            duration_seconds.append(seconds)
-                    except:
-                        continue
-                
-                if duration_seconds:
-                    analysis['duration'] = {
-                        'average_seconds': float(sum(duration_seconds) / len(duration_seconds)),
-                        'average_minutes': float(sum(duration_seconds) / len(duration_seconds) / 60),
-                        'max_seconds': max(duration_seconds),
-                        'min_seconds': min(duration_seconds)
-                    }
-        
-        # Hashtag analysis
-        if 'hashtags' in df.columns:
-            all_hashtags = []
-            for hashtag_list in df['hashtags'].dropna():
-                if isinstance(hashtag_list, list):
-                    all_hashtags.extend(hashtag_list)
-                elif isinstance(hashtag_list, str):
-                    # Handle string representation of lists
-                    try:
-                        import ast
-                        hashtag_list = ast.literal_eval(hashtag_list)
-                        if isinstance(hashtag_list, list):
-                            all_hashtags.extend(hashtag_list)
-                    except:
-                        pass
-            
-            if all_hashtags:
-                from collections import Counter
-                hashtag_counts = Counter(all_hashtags)
-                analysis['top_hashtags'] = dict(hashtag_counts.most_common(20))
-        
-        return analysis
-    
-    @staticmethod
-    def _parse_duration(duration_str: str) -> int:
-        """Parse duration string (e.g., '12:34' or '1:23:45') to seconds"""
-        if not duration_str or not isinstance(duration_str, str):
-            return 0
-        
-        parts = duration_str.strip().split(':')
-        if len(parts) == 2:  # MM:SS
-            minutes, seconds = map(int, parts)
-            return minutes * 60 + seconds
-        elif len(parts) == 3:  # HH:MM:SS
-            hours, minutes, seconds = map(int, parts)
-            return hours * 3600 + minutes * 60 + seconds
-        else:
-            return 0
-
-
 class ContentFilter:
     """Filter and process content based on various criteria"""
     
@@ -641,7 +536,7 @@ class ContentFilter:
         
         def duration_to_seconds(duration_str):
             try:
-                return DataAnalyzer._parse_duration(duration_str)
+                return ContentFilter._parse_duration(duration_str)
             except:
                 return 0
         
@@ -712,6 +607,22 @@ class ContentFilter:
         except Exception as e:
             logger.warning(f"Date filtering failed: {e}")
             return df
+    
+    @staticmethod
+    def _parse_duration(duration_str: str) -> int:
+        """Parse duration string (e.g., '12:34' or '1:23:45') to seconds"""
+        if not duration_str or not isinstance(duration_str, str):
+            return 0
+        
+        parts = duration_str.strip().split(':')
+        if len(parts) == 2:  # MM:SS
+            minutes, seconds = map(int, parts)
+            return minutes * 60 + seconds
+        elif len(parts) == 3:  # HH:MM:SS
+            hours, minutes, seconds = map(int, parts)
+            return hours * 3600 + minutes * 60 + seconds
+        else:
+            return 0
 
 
 class CacheManager:
