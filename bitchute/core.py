@@ -71,7 +71,8 @@ class BitChuteAPI:
         cache_tokens: bool = True,
         rate_limit: float = 0.5,
         timeout: int = 30,
-        max_retries: int = 3
+        max_retries: int = 3,
+        max_workers: int = 8
     ):
         """
         Initialize BitChute API client
@@ -86,6 +87,7 @@ class BitChuteAPI:
         self.verbose = verbose
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_workers = max_workers
         
         # Initialize logging
         self._setup_logging()
@@ -167,10 +169,6 @@ class BitChuteAPI:
     ) -> Optional[Dict[str, Any]]:
         """Make API request with enhanced error handling and retries"""
         # Validate inputs
-        
-        print(self.stats['requests_made'])
-        print(self.stats['errors'])
-        print()
         
         self.validator.validate_endpoint(endpoint)
         self.validator.validate_payload(payload)
@@ -362,13 +360,25 @@ class BitChuteAPI:
         timeframe: str = 'day', 
         limit: int = 50,
         per_page: int = 50,
-        include_details: bool = False
+        include_details: bool = False,
+        max_workers: int = 5
     ) -> pd.DataFrame:
         """
         Optimized version of get_trending_videos with concurrent detail fetching
+        
+        Args:
+            timeframe: 'day', 'week', or 'month'
+            limit: Total number of videos to retrieve (default: 50)
+            per_page: Number of videos per API call (default: 50, max: 100)
+            include_details: Fetch additional details for each video (likes, dislikes)
+            max_workers: Maximum concurrent workers for fetching details (default: 5)
+            
+        Returns:
+            DataFrame with all requested videos
         """
         import pandas as pd
         from dataclasses import asdict
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         
         # Validate inputs
         self.validator.validate_timeframe(timeframe)
@@ -430,37 +440,61 @@ class BitChuteAPI:
             video_ids = [video.id for video in all_videos if video.id]
             
             if video_ids:
-                details_manager = OptimizedDetailsManager(self, max_workers=8)
+                if self.verbose:
+                    logger.info(f"Fetching details for {len(video_ids)} videos concurrently...")
                 
-                try:
-                    # Try async approach first
-                    if self.verbose:
-                        logger.info(f"Fetching details for {len(video_ids)} videos concurrently...")
+                start_time = time.time()
+                
+                # Fetch details using thread pool
+                def fetch_video_details(video_id: str) -> dict:
+                    """Fetch details for a single video"""
+                    try:
+                        payload = {"video_id": video_id}
+                        data = self._make_request("beta/video/counts", payload)
+                        if data:
+                            return {
+                                'video_id': video_id,
+                                'like_count': int(data.get('like_count', 0) or 0),
+                                'dislike_count': int(data.get('dislike_count', 0) or 0),
+                                'view_count': int(data.get('view_count', 0) or 0)
+                            }
+                    except Exception as e:
+                        if self.verbose:
+                            logger.warning(f"Failed to fetch details for {video_id}: {e}")
                     
-                    start_time = time.time()
-                    details_map = asyncio.run(details_manager.fetch_details_batch_async(video_ids))
+                    return {'video_id': video_id}
+                
+                # Use ThreadPoolExecutor for concurrent requests
+                details_map = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all tasks
+                    future_to_id = {
+                        executor.submit(fetch_video_details, video_id): video_id
+                        for video_id in video_ids
+                    }
                     
-                    if self.verbose:
-                        duration = time.time() - start_time
-                        logger.info(f"Fetched details in {duration:.2f} seconds")
-                    
-                except Exception as e:
-                    if self.verbose:
-                        logger.warning(f"Async details fetch failed, falling back to threaded: {e}")
-                    
-                    # Fallback to threaded approach
-                    details_map = details_manager.fetch_details_batch_threaded(video_ids)
+                    # Collect results as they complete
+                    for future in as_completed(future_to_id):
+                        result = future.result()
+                        if result and 'video_id' in result:
+                            details_map[result['video_id']] = result
+                
+                if self.verbose:
+                    duration = time.time() - start_time
+                    success_count = sum(1 for d in details_map.values() if 'like_count' in d)
+                    logger.info(f"Fetched details for {success_count}/{len(video_ids)} videos in {duration:.2f} seconds")
                 
                 # Apply details to video objects
                 for video in all_videos:
                     if video.id in details_map:
                         details = details_map[video.id]
-                        video.like_count = details.get('like_count', 0)
-                        video.dislike_count = details.get('dislike_count', 0)
-                        # Update view count if higher
-                        new_view_count = details.get('view_count', video.view_count)
-                        if new_view_count > video.view_count:
-                            video.view_count = new_view_count
+                        if 'like_count' in details:
+                            video.like_count = details['like_count']
+                            video.dislike_count = details['dislike_count']
+                            # Update view count if higher
+                            new_view_count = details['view_count']
+                            if new_view_count > video.view_count:
+                                video.view_count = new_view_count
         
         # Step 3: Convert to DataFrame
         if all_videos:
