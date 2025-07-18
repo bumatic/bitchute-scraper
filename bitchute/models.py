@@ -1,14 +1,14 @@
 """
-BitChute Scraper Data Models
+BitChute Scraper Data Models - Enhanced with Download Support
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional
 from datetime import datetime, timezone
 
 @dataclass
 class Video:
-    """Video data model with comprehensive fields"""
+    """Video data model with comprehensive fields and download support"""
     # Core identifiers
     id: str = ""
     title: str = ""
@@ -57,6 +57,10 @@ class Video:
     # External IDs
     rumble_id: str = ""
     
+    # NEW: Download-related fields
+    local_thumbnail_path: str = ""
+    local_video_path: str = ""
+    
     def __post_init__(self):
         """Initialize computed fields"""
         if not self.scrape_timestamp:
@@ -99,6 +103,21 @@ class Video:
         
         return 0
     
+    @property
+    def has_local_thumbnail(self) -> bool:
+        """Check if thumbnail has been downloaded locally"""
+        return bool(self.local_thumbnail_path and self.local_thumbnail_path.strip())
+    
+    @property
+    def has_local_video(self) -> bool:
+        """Check if video has been downloaded locally"""
+        return bool(self.local_video_path and self.local_video_path.strip())
+    
+    @property
+    def is_fully_downloaded(self) -> bool:
+        """Check if both thumbnail and video are downloaded"""
+        return self.has_local_thumbnail and self.has_local_video
+    
     def to_dict(self) -> dict:
         """Convert to dictionary with computed properties"""
         data = {
@@ -134,12 +153,19 @@ class Video:
             'engagement_rate': self.engagement_rate,
             'like_ratio': self.like_ratio,
             'rumble_id': self.rumble_id,
-            'scrape_timestamp': self.scrape_timestamp
+            'scrape_timestamp': self.scrape_timestamp,
+            # NEW: Download fields
+            'local_thumbnail_path': self.local_thumbnail_path,
+            'local_video_path': self.local_video_path,
+            'has_local_thumbnail': self.has_local_thumbnail,
+            'has_local_video': self.has_local_video,
+            'is_fully_downloaded': self.is_fully_downloaded
         }
         return data
 
 @dataclass
 class Channel:
+    """Channel data model with comprehensive fields"""
     # Core identifiers
     id: str = ""
     name: str = ""
@@ -186,9 +212,6 @@ class Channel:
     live_stream_enabled: bool = False
     feature_video: Optional[str] = None
     
-    # NEW: Social media links
-    social_links: List[Dict[str, str]] = field(default_factory=list)
-    
     # Metadata
     scrape_timestamp: float = 0.0
     
@@ -226,30 +249,6 @@ class Channel:
             return 0.0
         return self.view_count / self.video_count
     
-    @property
-    def social_links_dict(self) -> Dict[str, str]:
-        """Convert social links list to dict for easy access"""
-        return {
-            link.get('social_media_name', '').lower(): link.get('url', '')
-            for link in self.social_links
-            if link.get('social_media_name') and link.get('url')
-        }
-    
-    @property 
-    def youtube_url(self) -> str:
-        """Get YouTube URL if available"""
-        return self.social_links_dict.get('youtube', '')
-    
-    @property
-    def twitter_url(self) -> str:
-        """Get Twitter/X URL if available"""
-        return self.social_links_dict.get('x', self.social_links_dict.get('twitter', ''))
-    
-    @property
-    def instagram_url(self) -> str:
-        """Get Instagram URL if available"""
-        return self.social_links_dict.get('instagram', '')
-    
     def to_dict(self) -> dict:
         """Convert to dictionary with computed properties"""
         return {
@@ -283,13 +282,8 @@ class Channel:
             'show_rantrave': self.show_rantrave,
             'live_stream_enabled': self.live_stream_enabled,
             'feature_video': self.feature_video,
-            'social_links': self.social_links,  # NEW
-            'youtube_url': self.youtube_url,    # NEW computed property
-            'twitter_url': self.twitter_url,    # NEW computed property
-            'instagram_url': self.instagram_url, # NEW computed property
             'scrape_timestamp': self.scrape_timestamp
         }
-
 
 @dataclass
 class Hashtag:
@@ -439,4 +433,52 @@ class APIStats:
             'session_duration': self.session_duration,
             'session_start_time': self.session_start_time,
             'last_request_time': self.last_request_time
+        }
+
+@dataclass
+class DownloadResult:
+    """NEW: Download operation result"""
+    video_id: str = ""
+    success: bool = False
+    thumbnail_path: Optional[str] = None
+    video_path: Optional[str] = None
+    error_message: Optional[str] = None
+    download_time: float = 0.0
+    file_size_bytes: int = 0
+    
+    @property
+    def has_thumbnail(self) -> bool:
+        """Check if thumbnail was downloaded"""
+        return self.thumbnail_path is not None
+    
+    @property
+    def has_video(self) -> bool:
+        """Check if video was downloaded"""
+        return self.video_path is not None
+    
+    @property
+    def file_size_formatted(self) -> str:
+        """Get formatted file size"""
+        if self.file_size_bytes == 0:
+            return "0 B"
+        
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if self.file_size_bytes < 1024:
+                return f"{self.file_size_bytes:.1f} {unit}"
+            self.file_size_bytes /= 1024
+        return f"{self.file_size_bytes:.1f} TB"
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary"""
+        return {
+            'video_id': self.video_id,
+            'success': self.success,
+            'thumbnail_path': self.thumbnail_path,
+            'video_path': self.video_path,
+            'error_message': self.error_message,
+            'download_time': self.download_time,
+            'file_size_bytes': self.file_size_bytes,
+            'file_size_formatted': self.file_size_formatted,
+            'has_thumbnail': self.has_thumbnail,
+            'has_video': self.has_video
         }
