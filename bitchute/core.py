@@ -67,7 +67,6 @@ class BitChuteAPI:
         timeout: int = 30,
         max_retries: int = 3,
         max_workers: int = 8,
-        # NEW: Download configuration parameters
         enable_downloads: bool = False,
         download_base_dir: str = "downloads",
         thumbnail_folder: str = "thumbnails",
@@ -318,7 +317,7 @@ class BitChuteAPI:
         
         # Temporarily reduce rate limiting for parallel operations
         original_rate_limit = self.rate_limiter.rate_limit
-        self.rate_limiter.rate_limit = 0.05
+        self.rate_limiter.rate_limit = 0.02
         
         try:
             # BATCH 1: Fetch counts AND hashtags from individual video details
@@ -854,7 +853,7 @@ class BitChuteAPI:
     def get_trending_videos(
         self, 
         timeframe: str = 'day', 
-        limit: int = 50,
+        limit: int = 20,
         include_details: bool = False,
         download_thumbnails: bool = False,
         download_videos: bool = False,
@@ -865,7 +864,7 @@ class BitChuteAPI:
         
         Args:
             timeframe: 'day', 'week', or 'month'
-            limit: Total number of videos to retrieve
+            limit: Total number of videos to retrieve. Defaults to the 20 videos shown as trending on the frontend. 
             include_details: Fetch like/dislike counts and media URLs
             download_thumbnails: Download thumbnail images (requires enable_downloads=True)
             download_videos: Download video files (requires enable_downloads=True)
@@ -912,7 +911,6 @@ class BitChuteAPI:
             data = self._make_request("beta/videos", payload)
             if not data or 'videos' not in data or not data['videos']:
                 break
-            
             videos = []
             for i, video_data in enumerate(data['videos'], 1):
                 video = self.data_processor.parse_video(video_data, offset + i)
@@ -983,9 +981,8 @@ class BitChuteAPI:
 
     def get_popular_videos(
         self, 
-        limit: int = 50, 
+        limit: int = 1000, 
         include_details: bool = False,
-        # NEW: Download parameters
         download_thumbnails: bool = False,
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
@@ -1052,7 +1049,7 @@ class BitChuteAPI:
             if video_ids:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(all_videos, details_map)
-        
+
         # Process downloads if requested
         if (download_thumbnails or download_videos) and all_videos:
                 all_videos = self._process_downloads(
@@ -1067,7 +1064,7 @@ class BitChuteAPI:
             video_dicts = [asdict(video) for video in all_videos]
             df = pd.DataFrame(video_dicts)
             df = self._ensure_consistent_schema(df)
-            
+
             if self.verbose:
                 detail_status = "with details" if include_details else "without details"
                 download_status = ""
@@ -1080,7 +1077,7 @@ class BitChuteAPI:
                     download_status = f" and downloaded {'/'.join(download_parts)}"
                 
                 logger.info(f"Retrieved {len(df)} popular videos {detail_status}{download_status}")
-        
+            return df
         return self._ensure_consistent_schema(pd.DataFrame())
 
     def get_recent_videos(
@@ -1187,7 +1184,6 @@ class BitChuteAPI:
         self, 
         limit: int = 1000, 
         include_details: bool = False,
-        # NEW: Download parameters
         download_thumbnails: bool = False,
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
@@ -1226,7 +1222,7 @@ class BitChuteAPI:
         )
     def get_short_videos(
         self, 
-        limit: int = 50, 
+        limit: int = 1000, 
         include_details: bool = False,
         download_thumbnails: bool = False,
         download_videos: bool = False,
@@ -1327,9 +1323,10 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
+    
     def get_member_picked_videos(
         self, 
-        limit: int = 50, 
+        limit: int = 100, 
         include_details: bool = False,
         download_thumbnails: bool = False,
         download_videos: bool = False,
@@ -1337,11 +1334,9 @@ class BitChuteAPI:
     ) -> pd.DataFrame:
         """
         Get member picked videos with optional parallel detail fetching and downloads
-     
-        Note: This endpoint doesn't support pagination, so it returns up to the API's limit.
         
         Args:
-            limit: Maximum number of videos to retrieve (default: 50)
+            limit: Total number of videos to retrieve (default: 50)
             include_details: Fetch like/dislike counts and media URLs (default: False)
             download_thumbnails: Download thumbnail images (requires enable_downloads=True)
             download_videos: Download video files (requires enable_downloads=True)
@@ -1350,43 +1345,95 @@ class BitChuteAPI:
         Returns:
             DataFrame with member picked videos and consistent schema
         """
+        if limit < 1:
+            raise ValidationError("Total limit must be at least 1", "limit")
         
-        self.validator.validate_limit(limit, max_limit=100)
+        all_videos = []
+        offset = 0
+        per_page = 50
+        total_retrieved = 0
 
         # Force download details if download videos is True
         if download_videos:
             include_details = True
         
-        payload = {"limit": limit}
-        
-        data = self._make_request("beta/member_liked_videos", payload)
-        if not data or 'videos' not in data:
-            return self._ensure_consistent_schema(pd.DataFrame())
-        
-        videos = []
-        for i, video_data in enumerate(data['videos'], 1):
-            video = self.data_processor.parse_video(video_data, i)
-            videos.append(video)
-        
-        # Parallel detail fetching if requested
-        if include_details and videos:
-            video_ids = [video.id for video in videos if video.id]
+        # Add pagination support like other methods
+        while total_retrieved < limit:
+            remaining = limit - total_retrieved
+            page_limit = min(per_page, remaining)
+            
+            # FIXED: Use consistent payload structure with offset/limit
+            payload = {
+                "offset": offset,
+                "limit": page_limit
+            }
+            
+            if self.verbose:
+                logger.info(f"Fetching member picked videos: offset={offset}, limit={page_limit}")
+            
+            # Use original endpoint with consistent payload structure
+            data = self._make_request("beta/member_liked_videos", payload)
+            if not data or 'videos' not in data or not data['videos']:
+                if self.verbose:
+                    logger.warning("No data returned from member picked videos endpoint")
+                break
+            
+            # Process data to fit default data structure. 
+            # As a result the date_liked data point is lost. >> POSSIBLE FUTURE ENHANCEMENT
+            
+            data['videos'] = [v['video'] for v in data['videos']]
+            
+            videos = []
+            for i, video_data in enumerate(data['videos'], 1):
+                video = self.data_processor.parse_video(video_data, offset + i)
+                videos.append(video)
+                
+                # FIXED: Stop exactly at limit like other methods
+                if len(all_videos) + len(videos) >= limit:
+                    videos = videos[:limit - len(all_videos)]
+                    break
+            
+            if videos:
+                all_videos.extend(videos)
+                total_retrieved = len(all_videos)
+                offset += len(videos)
+                
+                if self.verbose:
+                    logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
+            
+            #Check if we reached the exact limit
+            if total_retrieved >= limit:
+                break
+            
+            # Check if we got fewer videos than requested (end of data)
+            if len(videos) < page_limit:
+                if self.verbose:
+                    logger.info("Fewer videos returned than requested, end of data reached")
+                break
+            
+            #Add rate limiting between requests like other methods
+            if total_retrieved < limit:
+                time.sleep(self.rate_limiter.rate_limit)
+
+        # Parallel detail fetching if requested (same as other methods)
+        if include_details and all_videos:
+            video_ids = [video.id for video in all_videos if video.id]
             if video_ids:
                 details_map = self._fetch_details_parallel(video_ids)
-                self._apply_details_to_videos(videos, details_map)
+                self._apply_details_to_videos(all_videos, details_map)
 
-        # Process downloads if requested
-        if (download_thumbnails or download_videos) and videos:
-            videos = self._process_downloads(
-                videos, 
+        # Process downloads if requested (same as other methods)
+        if (download_thumbnails or download_videos) and all_videos:
+            all_videos = self._process_downloads(
+                all_videos, 
                 download_thumbnails=download_thumbnails,
                 download_videos=download_videos,
                 force_redownload=force_redownload
             )
         
-        # Convert to DataFrame with consistent schema
-        if videos:
-            video_dicts = [asdict(video) for video in videos]
+        # Convert to DataFrame with consistent schema (same as other methods)
+        if all_videos:
+            video_dicts = [asdict(video) for video in all_videos]
             df = pd.DataFrame(video_dicts)
             df = self._ensure_consistent_schema(df)
             
@@ -1407,7 +1454,8 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
-    def get_trending_hashtags(self, limit: int = 50) -> pd.DataFrame:
+
+    def get_trending_hashtags(self, limit: int = 1000) -> pd.DataFrame:
         """
         Get trending hashtags with automatic pagination
         
@@ -1592,7 +1640,6 @@ class BitChuteAPI:
         sort: Union[str, SortOrder] = SortOrder.NEW, 
         limit: int = 50, 
         include_details: bool = False,
-        # NEW: Download parameters
         download_thumbnails: bool = False,
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
@@ -1707,7 +1754,7 @@ class BitChuteAPI:
         query: str, 
         sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
         limit: int = 50,
-        include_details: bool = False  # NEW PARAMETER
+        include_details: bool = False
     ) -> pd.DataFrame:
         """
         Search for channels with optional parallel detail fetching
@@ -2043,7 +2090,6 @@ class BitChuteAPI:
         if include_media:
             try:
                 media_data = self._make_request("beta/video/media", payload)
-                print(media_data)
                 if media_data:
                     video.media_url = media_data.get('media_url', '')
                     video.media_type = media_data.get('media_type', '')
@@ -2088,7 +2134,6 @@ class BitChuteAPI:
             video.hashtags = []
             for tag_item in hashtags_data:
                 if isinstance(tag_item, dict):
-                    # New format: {"hashtag_id": "trump", "hashtag_count": 341}
                     tag_name = tag_item.get('hashtag_id', '')
                     if tag_name:
                         video.hashtags.append(f"#{tag_name}" if not tag_name.startswith('#') else tag_name)
@@ -2251,7 +2296,6 @@ class BitChuteAPI:
         if hasattr(self, 'session'):
             self.session.close()
         
-        # NEW: Clean up download manager
         if hasattr(self, 'download_manager') and self.download_manager:
             self.download_manager.cleanup()
         
