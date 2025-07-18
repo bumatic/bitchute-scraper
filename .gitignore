@@ -1,5 +1,5 @@
-ignore/
-BAK/
+_deprecated/
+_backups/
 **/.DS_Store
 
 # Byte-compiled / optimized / DLL files
