@@ -28,7 +28,7 @@ def get_package_info():
         'version': '1.0.0',
         'author': 'Marcus Burkhardt',
         'email': 'marcus.burkhardt@gmail.com',
-        'description': 'API-based package to scrape BitChute platform data with automatic download capabilities.',
+        'description': 'API-based package to scrape BitChute platform data.',
         'url': 'https://github.com/bumatic/bitchute-scraper'
     }
     

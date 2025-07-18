@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bitchute-scraper"
 dynamic = ["version"]
-description = "A modern, API-based package to scrape BitChute platform data with automatic download capabilities."
+description = "A modern, API-based package to scrape BitChute platform data."
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
