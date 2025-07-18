@@ -389,9 +389,6 @@ class BitChuteAPI:
         
         return details_map
 
-
-    # SOLUTION 2: MODIFY _apply_details_to_videos to handle hashtags
-
     def _apply_details_to_videos(self, videos: List, details_map: Dict[str, Dict[str, Any]]):
         """
         FIXED: Apply fetched details including hashtags to Video objects
@@ -465,6 +462,258 @@ class BitChuteAPI:
         boolean_cols = ['is_short']
         for col in boolean_cols:
             df[col] = df[col].astype(bool)
+        
+        return df
+
+    def _fetch_channel_details_parallel(self, channel_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch detailed channel information and profile links in parallel
+        
+        Args:
+            channel_ids: List of channel IDs to enrich
+            
+        Returns:
+            Dict mapping channel_id to detailed info including social links
+        """
+        if not channel_ids:
+            return {}
+        
+        if self.verbose:
+            logger.info(f"Fetching detailed info for {len(channel_ids)} channels with {self.max_workers} workers...")
+        
+        start_time = time.time()
+        details_map = {}
+        
+        # Initialize all channel IDs in results
+        for channel_id in channel_ids:
+            details_map[channel_id] = {
+                'channel_id': channel_id,
+                'full_details': {},
+                'social_links': []
+            }
+        
+        # Temporarily reduce rate limiting for parallel operations
+        original_rate_limit = self.rate_limiter.rate_limit
+        self.rate_limiter.rate_limit = 0.05
+        
+        try:
+            # BATCH 1: Fetch full channel details
+            if self.verbose:
+                logger.info("Batch 1: Fetching full channel details...")
+            
+            def fetch_channel_details(channel_id: str) -> Dict[str, Any]:
+                """Fetch full channel details for a single channel"""
+                try:
+                    payload = {"channel_id": channel_id}
+                    data = self._make_request("beta/channel", payload)
+                    if data:
+                        return {
+                            'channel_id': channel_id,
+                            'full_details': data
+                        }
+                except Exception as e:
+                    if self.verbose:
+                        logger.warning(f"Failed to fetch channel details for {channel_id}: {e}")
+                
+                return {'channel_id': channel_id}
+            
+            # Execute channel details in parallel
+            with ThreadPoolExecutor(max_workers=min(self.max_workers, len(channel_ids))) as executor:
+                future_to_id = {
+                    executor.submit(fetch_channel_details, channel_id): channel_id
+                    for channel_id in channel_ids
+                }
+                
+                for future in as_completed(future_to_id):
+                    result = future.result()
+                    if result and 'channel_id' in result:
+                        channel_id = result['channel_id']
+                        if 'full_details' in result:
+                            details_map[channel_id]['full_details'] = result['full_details']
+            
+            # BATCH 2: Fetch profile links for channels that have profile_id
+            if self.verbose:
+                logger.info("Batch 2: Fetching profile links...")
+            
+            def fetch_profile_links(channel_info: Dict[str, Any]) -> Dict[str, Any]:
+                """Fetch profile links for a channel"""
+                channel_id = channel_info['channel_id']
+                full_details = channel_info['full_details']
+                
+                try:
+                    profile_id = full_details.get('profile_id')
+                    if profile_id:
+                        payload = {
+                            "profile_id": profile_id,
+                            "offset": 0,
+                            "limit": 20  # Get up to 20 social links
+                        }
+                        data = self._make_request("beta/profile/links", payload)
+                        if data and 'links' in data:
+                            return {
+                                'channel_id': channel_id,
+                                'social_links': data['links']
+                            }
+                except Exception as e:
+                    if self.verbose:
+                        logger.warning(f"Failed to fetch profile links for {channel_id}: {e}")
+                
+                return {'channel_id': channel_id, 'social_links': []}
+            
+            # Prepare channels that have profile_id for link fetching
+            channels_with_profiles = []
+            for channel_id, details in details_map.items():
+                if details['full_details'].get('profile_id'):
+                    channels_with_profiles.append({
+                        'channel_id': channel_id,
+                        'full_details': details['full_details']
+                    })
+            
+            # Execute profile links in parallel
+            if channels_with_profiles:
+                with ThreadPoolExecutor(max_workers=min(self.max_workers, len(channels_with_profiles))) as executor:
+                    future_to_id = {
+                        executor.submit(fetch_profile_links, channel_info): channel_info['channel_id']
+                        for channel_info in channels_with_profiles
+                    }
+                    
+                    for future in as_completed(future_to_id):
+                        result = future.result()
+                        if result and 'channel_id' in result:
+                            channel_id = result['channel_id']
+                            details_map[channel_id]['social_links'] = result['social_links']
+        
+        finally:
+            # Restore original rate limiting
+            self.rate_limiter.rate_limit = original_rate_limit
+        
+        # Log results
+        if self.verbose:
+            duration = time.time() - start_time
+            success_details = sum(1 for d in details_map.values() if d['full_details'])
+            success_links = sum(1 for d in details_map.values() if d['social_links'])
+            logger.info(f"Channel details fetch completed in {duration:.2f}s: {success_details}/{len(channel_ids)} details, {success_links}/{len(channel_ids)} social links")
+        
+        return details_map
+
+    def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
+        """
+        Apply fetched detailed info to Channel objects
+        
+        Args:
+            channels: List of Channel objects to enrich
+            details_map: Details from _fetch_channel_details_parallel()
+        """
+        for channel in channels:
+            if channel.id in details_map:
+                details = details_map[channel.id]
+                
+                # Apply full channel details (overwrite with more complete data)
+                full_details = details.get('full_details', {})
+                if full_details:
+                    # Update all fields with complete data
+                    channel.description = full_details.get('description', channel.description)
+                    channel.video_count = int(full_details.get('video_count', channel.video_count) or 0)
+                    channel.view_count = int(full_details.get('view_count', channel.view_count) or 0)
+                    channel.subscriber_count = str(full_details.get('subscriber_count', channel.subscriber_count))
+                    channel.created_date = full_details.get('date_created', channel.created_date)
+                    channel.last_video_published = full_details.get('last_video_published', channel.last_video_published)
+                    channel.profile_id = full_details.get('profile_id', channel.profile_id)
+                    channel.profile_name = full_details.get('profile_name', channel.profile_name)
+                    channel.membership_level = full_details.get('membership_level', channel.membership_level)
+                    channel.url_slug = full_details.get('url_slug', channel.url_slug)
+                    channel.is_subscribed = bool(full_details.get('is_subscribed', channel.is_subscribed))
+                    channel.is_notified = bool(full_details.get('is_notified', channel.is_notified))
+                    channel.live_stream_enabled = bool(full_details.get('live_stream_enabled', channel.live_stream_enabled))
+                    channel.feature_video = full_details.get('feature_video', channel.feature_video)
+                
+                # Apply social links (new field)
+                social_links = details.get('social_links', [])
+                channel.social_links = social_links  # This will now work because we added the field
+
+    def _ensure_consistent_channel_schema(self, df: pd.DataFrame, include_details: bool = False):
+        """
+        FIXED: Ensure DataFrame has consistent channel schema
+        
+        Args:
+            df: DataFrame to standardize
+            include_details: Whether detailed fields should be included
+            
+        Returns:
+            DataFrame with consistent columns and types
+        """
+        # Basic channel columns (always present)
+        basic_columns = {
+            'id': '',
+            'name': '', 
+            'description': '',
+            'url_slug': '',
+            'video_count': 0,
+            'subscriber_count': '',
+            'view_count': 0,
+            'created_date': '',
+            'last_video_published': '',
+            'profile_id': '',
+            'profile_name': '',
+            'category': '',
+            'category_id': '',
+            'sensitivity': '',
+            'sensitivity_id': '',
+            'thumbnail_url': '',
+            'channel_url': '',
+            'state': '',
+            'state_id': '',
+            'scrape_timestamp': 0.0
+        }
+        
+        # Additional columns when include_details=True
+        if include_details:
+            detailed_columns = {
+                'membership_level': 'Default',
+                'is_verified': False,
+                'is_subscribed': False,
+                'is_notified': False,
+                'show_adverts': True,
+                'show_comments': True,
+                'show_rantrave': True,
+                'live_stream_enabled': False,
+                'feature_video': None,
+                'social_links': []  # NEW: List of social media links
+            }
+            basic_columns.update(detailed_columns)
+        
+        # Handle empty DataFrame
+        if df.empty:
+            # Create empty DataFrame with correct columns
+            empty_df = pd.DataFrame(columns=list(basic_columns.keys()))
+            return empty_df
+        
+        # Add missing columns with default values - FIXED approach
+        for col, default_val in basic_columns.items():
+            if col not in df.columns:
+                # FIXED: Use scalar for non-list defaults, appropriate value for lists
+                if isinstance(default_val, list):
+                    # For list columns like social_links, create list for each row
+                    df[col] = [default_val.copy() for _ in range(len(df))]
+                else:
+                    # For scalar values, use the default
+                    df[col] = default_val
+        
+        # Ensure correct column order
+        df = df.reindex(columns=list(basic_columns.keys()), fill_value='')
+        
+        # Convert types
+        numeric_cols = ['video_count', 'view_count', 'scrape_timestamp']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        
+        if include_details:
+            boolean_cols = ['is_verified', 'is_subscribed', 'is_notified', 
+                           'show_adverts', 'show_comments', 'show_rantrave', 'live_stream_enabled']
+            for col in boolean_cols:
+                if col in df.columns:
+                    df[col] = df[col].astype(bool)
         
         return df
 
@@ -1089,8 +1338,33 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
-    def search_channels(self, query: str, sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL, limit: int = 50) -> pd.DataFrame:
-        """FIXED: Search channels with EXACT limit respect - NO include_details parameter"""
+    def search_channels(
+        self, 
+        query: str, 
+        sensitivity: Union[str, SensitivityLevel] = SensitivityLevel.NORMAL,
+        limit: int = 50,
+        include_details: bool = False  # NEW PARAMETER
+    ) -> pd.DataFrame:
+        """
+        Search for channels with optional parallel detail fetching
+        
+        Args:
+            query: Search query
+            sensitivity: Content sensitivity level
+            limit: Total number of results to retrieve (default: 50)
+            include_details: Fetch full channel details and profile links (default: False)
+            
+        Returns:
+            DataFrame with all search results and detailed info if requested
+            
+        Example:
+            >>> # Basic search
+            >>> channels = api.search_channels('climate', limit=10)
+            
+            >>> # With detailed info (subscriber counts, descriptions, social links)
+            >>> detailed = api.search_channels('climate', limit=10, include_details=True)
+            >>> print(detailed.columns)  # Includes full channel details + social_links
+        """
         self.validator.validate_search_query(query)
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
@@ -1127,7 +1401,7 @@ class BitChuteAPI:
                 channel = self.data_processor.parse_channel(channel_data, offset + i)
                 channels.append(channel)
                 
-                # FIXED: Stop exactly at limit
+                # Stop exactly at limit
                 if len(all_channels) + len(channels) >= limit:
                     break
             
@@ -1135,7 +1409,7 @@ class BitChuteAPI:
                 all_channels.extend(channels)
                 offset += len(channels)
                 
-                # FIXED: Stop exactly at limit
+                # Stop exactly at limit
                 if len(all_channels) >= limit:
                     all_channels = all_channels[:limit]
                     break
@@ -1146,14 +1420,28 @@ class BitChuteAPI:
             if len(all_channels) < limit:
                 time.sleep(self.rate_limiter.rate_limit)
         
+        # Parallel detail fetching if requested
+        if include_details and all_channels:
+            channel_ids = [channel.id for channel in all_channels if channel.id]
+            if channel_ids:
+                details_map = self._fetch_channel_details_parallel(channel_ids)
+                self._apply_channel_details_to_channels(all_channels, details_map)
+        
+        # Convert to DataFrame
         if all_channels:
             channel_dicts = [asdict(channel) for channel in all_channels]
             df = pd.DataFrame(channel_dicts)
+            
+            # Ensure consistent schema
+            df = self._ensure_consistent_channel_schema(df, include_details)
+            
             if self.verbose:
-                logger.info(f"Found {len(df)} channels for '{query}'")
+                detail_status = "with details" if include_details else "without details"
+                logger.info(f"Found {len(df)} channels for '{query}' {detail_status}")
+            
             return df
         
-        return pd.DataFrame()
+        return self._ensure_consistent_channel_schema(pd.DataFrame(), include_details)
 
     # ================================
     # CHANNEL FUNCTIONS

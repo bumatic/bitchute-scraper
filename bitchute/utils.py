@@ -222,18 +222,13 @@ class DataProcessor:
     
     def parse_channel(self, data: Dict[str, Any], rank: int = 0) -> Channel:
         """
-        Parse channel data from API response with correct field mapping
-        
-        Args:
-            data: Raw channel data from API
-            rank: Channel ranking/position
-            
-        Returns:
-            Parsed Channel object
+        UPDATED: Parse channel data with social_links support
         """
         channel = Channel()
         
         try:
+            # ... all existing parsing logic remains the same ...
+            
             # Core identifiers
             channel.id = self._safe_get(data, 'channel_id', self._safe_get(data, 'id', ''))
             channel.name = self._safe_get(data, 'channel_name', self._safe_get(data, 'name', data.get('title', '')))
@@ -298,11 +293,14 @@ class DataProcessor:
             channel.live_stream_enabled = bool(data.get('live_stream_enabled', False))
             channel.feature_video = data.get('feature_video')
             
+            # NEW: Initialize social_links (will be populated later by _apply_channel_details_to_channels)
+            channel.social_links = []
+            
         except Exception as e:
             logger.warning(f"Error parsing channel data: {e}")
         
         return channel
-    
+
     def parse_hashtag(self, data: Dict[str, Any], rank: int = 0) -> Hashtag:
         """
         Parse hashtag data from API response

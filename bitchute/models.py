@@ -3,7 +3,7 @@ BitChute Scraper Data Models
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timezone
 
 @dataclass
@@ -140,7 +140,6 @@ class Video:
 
 @dataclass
 class Channel:
-    """Channel data model with comprehensive fields"""
     # Core identifiers
     id: str = ""
     name: str = ""
@@ -187,6 +186,9 @@ class Channel:
     live_stream_enabled: bool = False
     feature_video: Optional[str] = None
     
+    # NEW: Social media links
+    social_links: List[Dict[str, str]] = field(default_factory=list)
+    
     # Metadata
     scrape_timestamp: float = 0.0
     
@@ -224,6 +226,30 @@ class Channel:
             return 0.0
         return self.view_count / self.video_count
     
+    @property
+    def social_links_dict(self) -> Dict[str, str]:
+        """Convert social links list to dict for easy access"""
+        return {
+            link.get('social_media_name', '').lower(): link.get('url', '')
+            for link in self.social_links
+            if link.get('social_media_name') and link.get('url')
+        }
+    
+    @property 
+    def youtube_url(self) -> str:
+        """Get YouTube URL if available"""
+        return self.social_links_dict.get('youtube', '')
+    
+    @property
+    def twitter_url(self) -> str:
+        """Get Twitter/X URL if available"""
+        return self.social_links_dict.get('x', self.social_links_dict.get('twitter', ''))
+    
+    @property
+    def instagram_url(self) -> str:
+        """Get Instagram URL if available"""
+        return self.social_links_dict.get('instagram', '')
+    
     def to_dict(self) -> dict:
         """Convert to dictionary with computed properties"""
         return {
@@ -257,8 +283,13 @@ class Channel:
             'show_rantrave': self.show_rantrave,
             'live_stream_enabled': self.live_stream_enabled,
             'feature_video': self.feature_video,
+            'social_links': self.social_links,  # NEW
+            'youtube_url': self.youtube_url,    # NEW computed property
+            'twitter_url': self.twitter_url,    # NEW computed property
+            'instagram_url': self.instagram_url, # NEW computed property
             'scrape_timestamp': self.scrape_timestamp
         }
+
 
 @dataclass
 class Hashtag:
