@@ -1,0 +1,139 @@
+# BitChute Scraper Development Requirements
+# Install with: pip install -r requirements-dev.txt
+
+# Include base requirements
+-r requirements.txt
+
+# ============================================================================
+# TESTING DEPENDENCIES
+# ============================================================================
+
+# Core testing framework
+pytest>=7.0.0
+
+# Mock objects and patches for testing
+pytest-mock>=3.10.0
+
+# Test coverage reporting
+pytest-cov>=4.0.0
+
+# Pytest plugins for better testing
+pytest-xdist>=3.0.0        # Parallel test execution
+pytest-benchmark>=4.0.0    # Performance benchmarking
+pytest-timeout>=2.1.0      # Test timeouts
+pytest-html>=3.1.0         # HTML test reports
+
+# ============================================================================
+# CODE QUALITY AND FORMATTING
+# ============================================================================
+
+# Code formatting
+black>=22.0.0
+
+# Linting and style checking
+flake8>=5.0.0
+flake8-docstrings>=1.6.0   # Docstring style checking
+flake8-import-order>=0.18.1 # Import order checking
+flake8-bugbear>=22.0.0     # Additional bug detection
+
+# Type checking
+mypy>=1.0.0
+
+# Type stubs for external libraries
+types-requests>=2.28.0
+types-python-dateutil>=2.8.0
+types-tqdm>=4.64.0
+
+# Security scanning
+bandit>=1.7.0               # Security linting
+safety>=2.0.0               # Dependency vulnerability scanning
+
+# ============================================================================
+# DOCUMENTATION
+# ============================================================================
+
+# Documentation generation
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.0.0
+sphinx-autodoc-typehints>=1.19.0
+myst-parser>=0.18.0         # Markdown support in Sphinx
+
+# Documentation linting
+doc8>=1.0.0                 # RST/Markdown linting
+pydocstyle>=6.1.0          # Docstring style checking
+
+# ============================================================================
+# DEVELOPMENT UTILITIES
+# ============================================================================
+
+# Environment management and tools
+pip-tools>=6.8.0           # Requirements management
+wheel>=0.37.0               # Package building
+twine>=4.0.0                # Package uploading to PyPI
+
+# Pre-commit hooks
+pre-commit>=2.20.0
+
+# Jupyter notebook support for development and examples
+jupyter>=1.0.0
+notebook>=6.4.0
+ipykernel>=6.15.0
+
+# Development server and debugging
+ipdb>=0.13.0                # Enhanced debugger
+rich>=12.0.0                # Better terminal output
+
+# ============================================================================
+# PERFORMANCE PROFILING
+# ============================================================================
+
+# Performance monitoring and profiling
+memory-profiler>=0.60.0    # Memory usage profiling
+line-profiler>=4.0.0       # Line-by-line profiling
+py-spy>=0.3.0              # Sampling profiler
+
+# ============================================================================
+# ADDITIONAL DEVELOPMENT TOOLS
+# ============================================================================
+
+# Configuration file validation
+yamllint>=1.26.0            # YAML file linting
+
+# Git hooks and automation
+gitpython>=3.1.0            # Git repository interaction
+
+# Build and packaging tools
+build>=0.8.0                # Modern Python build tool
+
+# ============================================================================
+# INSTALLATION COMMANDS
+# ============================================================================
+#
+# Install development environment:
+#   pip install -r requirements-dev.txt
+#
+# Install with editable package:
+#   pip install -e .
+#   pip install -r requirements-dev.txt
+#
+# Setup pre-commit hooks:
+#   pre-commit install
+#
+# Run tests:
+#   pytest
+#   pytest --cov=bitchute --cov-report=html
+#
+# Format code:
+#   black bitchute/
+#   
+# Lint code:
+#   flake8 bitchute/
+#   mypy bitchute/
+#
+# Build documentation:
+#   cd docs && make html
+#
+# Build package:
+#   python -m build
+#
+# ============================================================================

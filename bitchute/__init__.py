@@ -1,5 +1,5 @@
 """
-BitChute Scraper - Enhanced with Download Functionality
+BitChute Scraper
 """
 
 from .core import BitChuteAPI, SensitivityLevel, SortOrder, VideoSelection
@@ -28,7 +28,7 @@ from .utils import (
     CacheManager
 )
 
-__version__ = "1.1.0"  # Bump version for new download features
+__version__ = "1.0.0"
 __author__ = "Marcus Burkhardt"
 __email__ = "marcus.burkhardt@gmail.com"
 __description__ = "A modern, API-based package to scrape BitChute platform data with automatic download capabilities."

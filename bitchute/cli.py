@@ -287,3 +287,171 @@ For more information, visit: https://github.com/bumatic/bitchute-scraper
                        help='Number of videos (default: 30)')
     recent.add_argument('--pages', '-p', type=int, default=1,
                    help='Number of pages to fetch (default: 1)')
+
+def main():
+    """Main entry point for the CLI application"""
+    try:
+        # Parse arguments
+        parser = create_argument_parser()
+        args = parser.parse_args()
+        
+        # Handle case where no command is provided
+        if not args.command:
+            parser.print_help()
+            return 0
+        
+        # Initialize API client
+        api = BitChuteAPI(
+            verbose=args.verbose,
+            timeout=args.timeout
+        )
+        
+        # Initialize utilities
+        data_manager = CLIDataManager()
+        
+        # Parse output formats
+        formats = [fmt.strip() for fmt in args.format.split(',')]
+        
+        # Execute command
+        try:
+            if args.command == 'trending':
+                df = api.get_trending_videos(
+                    timeframe=args.timeframe,
+                    limit=args.limit,
+                    include_details=True
+                )
+                CLIResultPrinter.print_video_results(df, f"Trending Videos ({args.timeframe})")
+                
+                if not df.empty:
+                    data_manager.save_data(df, f'trending_{args.timeframe}', formats, args.verbose)
+                    data_manager.analyze_data(df, args.analyze)
+            
+            elif args.command == 'popular':
+                df = api.get_popular_videos(
+                    limit=args.limit,
+                    include_details=True
+                )
+                CLIResultPrinter.print_video_results(df, "Popular Videos")
+                
+                if not df.empty:
+                    data_manager.save_data(df, 'popular_videos', formats, args.verbose)
+                    data_manager.analyze_data(df, args.analyze)
+            
+            elif args.command == 'recent':
+                # Handle pages parameter for recent videos
+                total_limit = args.limit * args.pages if hasattr(args, 'pages') else args.limit
+                df = api.get_recent_videos(
+                    limit=total_limit,
+                    include_details=True
+                )
+                CLIResultPrinter.print_video_results(df, "Recent Videos")
+                
+                if not df.empty:
+                    data_manager.save_data(df, 'recent_videos', formats, args.verbose)
+                    data_manager.analyze_data(df, args.analyze)
+            
+            elif args.command == 'search':
+                if hasattr(args, 'query'):
+                    df = api.search_videos(
+                        query=args.query,
+                        limit=args.limit,
+                        sensitivity=getattr(args, 'sensitivity', 'normal'),
+                        sort=getattr(args, 'sort', 'new'),
+                        include_details=True
+                    )
+                    CLIResultPrinter.print_video_results(df, f"Search Results for '{args.query}'")
+                    
+                    if not df.empty:
+                        safe_query = "".join(c for c in args.query if c.isalnum() or c in (' ', '_', '-')).rstrip()
+                        data_manager.save_data(df, f'search_{safe_query}', formats, args.verbose)
+                        data_manager.analyze_data(df, args.analyze)
+                else:
+                    print(CLIFormatter.error("Search query is required"))
+                    return 1
+            
+            elif args.command == 'channels':
+                if hasattr(args, 'query'):
+                    df = api.search_channels(
+                        query=args.query,
+                        limit=args.limit,
+                        sensitivity=getattr(args, 'sensitivity', 'normal'),
+                        include_details=True
+                    )
+                    CLIResultPrinter.print_channel_results(df, f"Channel Search Results for '{args.query}'")
+                    
+                    if not df.empty:
+                        safe_query = "".join(c for c in args.query if c.isalnum() or c in (' ', '_', '-')).rstrip()
+                        data_manager.save_data(df, f'channels_{safe_query}', formats, args.verbose)
+                else:
+                    print(CLIFormatter.error("Search query is required for channel search"))
+                    return 1
+            
+            elif args.command == 'hashtags':
+                df = api.get_trending_hashtags(limit=args.limit)
+                CLIResultPrinter.print_hashtag_results(df, "Trending Hashtags")
+                
+                if not df.empty:
+                    data_manager.save_data(df, 'trending_hashtags', formats, args.verbose)
+            
+            elif args.command == 'video':
+                if hasattr(args, 'video_id'):
+                    df = api.get_video_info(
+                        video_id=args.video_id,
+                        include_counts=getattr(args, 'counts', True),
+                        include_media=getattr(args, 'media', False)
+                    )
+                    
+                    if not df.empty:
+                        print(f"\n📹 {CLIFormatter.bold('Video Details')}:")
+                        video = df.iloc[0]
+                        print(f"   Title: {video['title']}")
+                        print(f"   Channel: {video['channel_name']}")
+                        print(f"   Views: {video['view_count']:,}")
+                        print(f"   Duration: {video['duration']}")
+                        print(f"   Upload Date: {video['upload_date']}")
+                        
+                        if video['like_count'] > 0 or video['dislike_count'] > 0:
+                            total_reactions = video['like_count'] + video['dislike_count']
+                            like_ratio = video['like_count'] / total_reactions if total_reactions > 0 else 0
+                            print(f"   Likes: {video['like_count']:,} ({like_ratio:.1%})")
+                            print(f"   Dislikes: {video['dislike_count']:,}")
+                        
+                        data_manager.save_data(df, f'video_{args.video_id}', formats, args.verbose)
+                    else:
+                        print(CLIFormatter.error(f"Video not found: {args.video_id}"))
+                        return 1
+                else:
+                    print(CLIFormatter.error("Video ID is required"))
+                    return 1
+            
+            else:
+                print(CLIFormatter.error(f"Unknown command: {args.command}"))
+                parser.print_help()
+                return 1
+                
+        except BitChuteAPIError as e:
+            print(CLIFormatter.error(f"API Error: {e}"))
+            return 1
+        except ValidationError as e:
+            print(CLIFormatter.error(f"Validation Error: {e}"))
+            return 1
+        except KeyboardInterrupt:
+            print(CLIFormatter.warning("\nOperation cancelled by user"))
+            return 1
+        except Exception as e:
+            print(CLIFormatter.error(f"Unexpected error: {e}"))
+            if args.verbose:
+                import traceback
+                traceback.print_exc()
+            return 1
+        
+        print(CLIFormatter.success("Operation completed successfully!"))
+        return 0
+        
+    except Exception as e:
+        print(CLIFormatter.error(f"CLI Error: {e}"))
+        return 1
+
+
+if __name__ == "__main__":
+    exit(main())
