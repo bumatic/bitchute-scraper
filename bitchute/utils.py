@@ -166,19 +166,21 @@ class DataProcessor:
             # Profile ID
             video.profile_id = self._safe_get(data, 'profile_id', '')
             
-            # Hashtags processing - handle new format
+            # FIXED: Hashtags processing - handle new format properly
             hashtags_data = data.get('hashtags', data.get('tags', []))
-            if isinstance(hashtags_data, list):
+            if hashtags_data:
                 video.hashtags = []
                 for tag_item in hashtags_data:
                     if isinstance(tag_item, dict):
                         # New format: {"hashtag_id": "trump", "hashtag_count": 341}
                         tag_name = tag_item.get('hashtag_id', '')
                         if tag_name:
-                            video.hashtags.append(f"#{tag_name}" if not tag_name.startswith('#') else tag_name)
+                            formatted_tag = f"#{tag_name}" if not tag_name.startswith('#') else tag_name
+                            video.hashtags.append(formatted_tag)
                     elif isinstance(tag_item, str) and tag_item:
                         # Old format: just string
-                        video.hashtags.append(f"#{tag_item}" if not tag_item.startswith('#') else tag_item)
+                        formatted_tag = f"#{tag_item}" if not tag_item.startswith('#') else tag_item
+                        video.hashtags.append(formatted_tag)
             
             # Engagement metrics (may be populated later)
             video.like_count = self._safe_int(data.get('like_count', 0))
