@@ -2,7 +2,8 @@
 
 # Bitchute Scraper
 
-Python scraper for the Bitchute video platform. It allows you to query for videos and to retrieve platform recommendations such as trending videos, popular videos or trending tags. It makes use of Selenium for retrieving data.
+Python scraper for the Bitchute video platform. It allows you to query for videos and to retrieve platform recommendations such as trending videos, popular videos (now called "fresh") or trending tags. The relase of version 1.0.0 is a major update using an API approach to data collection compared to the Selenium based scraper of now defunct previous versions. Since the tcode base was completely rewritten in collaboration with Claude AI backwards compatability is not provided.
+
 
 ## Installation
 
@@ -41,7 +42,7 @@ Create a crawler object and download the trending videos.
 
 ```Python
 import bitchute as bc
-b = bc.Crawler()        
+ = bc.Crawler()        
 trending_videos = b.get_trending_videos()
 ```
 
