@@ -523,8 +523,18 @@ class BitChuteAPI:
         Returns:
             Updated list of Video objects with local file paths
         """
-        if not self.enable_downloads or not self.download_manager:
-            return videos
+
+        # Allow downloads if explicitly requested OR if downloads are globally enabled
+        if not ((download_thumbnails or download_videos) or self.enable_downloads):
+             return videos
+        
+        # Initialize download manager on-demand if needed but downloads are requested
+        if not self.download_manager and (download_thumbnails or download_videos):
+            if self.verbose:
+                logger.info("Download manager not initialized but downloads requested. Initializing with defaults.")
+            self.download_manager = MediaDownloadManager(
+                base_dir="downloads", thumbnail_folder="thumbnails", video_folder="videos",
+                force_redownload=False, max_concurrent_downloads=3, timeout=self.timeout, verbose=self.verbose)
         
         if not download_thumbnails and not download_videos:
             return videos
@@ -565,24 +575,18 @@ class BitChuteAPI:
                 )
                 
                 # Update video objects with local file paths
-                for video in videos:
-                    # Update thumbnail path
-                    if download_thumbnails and video.id in results:
-                        for task in download_tasks:
-                            if (task['video_id'] == video.id and 
-                                task['media_type'] == 'thumbnail' and
-                                results.get(video.id)):
-                                video.local_thumbnail_path = results[video.id]
-                                break
-                    
-                    # Update video path
-                    if download_videos and video.id in results:
-                        for task in download_tasks:
-                            if (task['video_id'] == video.id and 
-                                task['media_type'] == 'video' and
-                                results.get(video.id)):
-                                video.local_video_path = results[video.id]
-                                break
+                if video.id in results:
+                        video_results = results[video.id]
+                        
+                        # Update thumbnail path
+                        if download_thumbnails and 'thumbnail' in video_results:
+                            if video_results['thumbnail']:
+                                video.local_thumbnail_path = video_results['thumbnail']
+                        
+                        # Update video path  
+                        if download_videos and 'video' in video_results:
+                            if video_results['video']:
+                                video.local_video_path = video_results['video']
             
         finally:
             # Restore original force_redownload setting
@@ -759,7 +763,7 @@ class BitChuteAPI:
 
     def _ensure_consistent_channel_schema(self, df: pd.DataFrame, include_details: bool = False):
         """
-        FIXED: Ensure DataFrame has consistent channel schema
+        Ensure DataFrame has consistent channel schema
         
         Args:
             df: DataFrame to standardize
@@ -886,6 +890,9 @@ class BitChuteAPI:
         offset = 0
         per_page = 50
         total_retrieved = 0
+
+        if download_videos:
+            include_details = True
         
         while total_retrieved < limit:
             # FIXED: Calculate how many to fetch this page
@@ -991,6 +998,10 @@ class BitChuteAPI:
         all_videos = []
         offset = 0
         per_page = 50
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         while len(all_videos) < limit:
             # Calculate exact amount needed
@@ -1087,6 +1098,10 @@ class BitChuteAPI:
         all_videos = []
         offset = 0
         per_page = 50
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         while len(all_videos) < limit:
             remaining = limit - len(all_videos)
@@ -1209,15 +1224,24 @@ class BitChuteAPI:
             download_videos=download_videos,
             force_redownload=force_redownload
         )
-
-    def get_short_videos(self, limit: int = 50, include_details: bool = False) -> pd.DataFrame:
+    def get_short_videos(
+        self, 
+        limit: int = 50, 
+        include_details: bool = False,
+        download_thumbnails: bool = False,
+        download_videos: bool = False,
+        force_redownload: Optional[bool] = None
+    ) -> pd.DataFrame:
         """
-        Get short videos with optional parallel detail fetching
-        
+        Get short videos with optional parallel detail fetching and downloads
+     
         Args:
             limit: Total number of videos to retrieve (default: 50)
             include_details: Fetch like/dislike counts and media URLs (default: False)
-            
+            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
+            download_videos: Download video files (requires enable_downloads=True)
+            force_redownload: Override instance force_redownload setting
+             
         Returns:
             DataFrame with all requested videos and consistent schema
         """
@@ -1271,6 +1295,15 @@ class BitChuteAPI:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(all_videos, details_map)
         
+        # Process downloads if requested
+        if (download_thumbnails or download_videos) and all_videos:
+            all_videos = self._process_downloads(
+                all_videos, 
+                download_thumbnails=download_thumbnails,
+                download_videos=download_videos,
+                force_redownload=force_redownload
+            )
+        
         # Convert to DataFrame with consistent schema
         if all_videos:
             video_dicts = [asdict(video) for video in all_videos]
@@ -1279,26 +1312,50 @@ class BitChuteAPI:
             
             if self.verbose:
                 detail_status = "with details" if include_details else "without details"
-                logger.info(f"Retrieved {len(df)} short videos {detail_status}")
+                download_status = ""
+                if download_thumbnails or download_videos:
+                    download_parts = []
+                    if download_thumbnails:
+                        download_parts.append("thumbnails")
+                    if download_videos:
+                        download_parts.append("videos")
+                    download_status = f" and downloaded {'/'.join(download_parts)}"
+                
+                logger.info(f"Retrieved {len(df)} short videos {detail_status}{download_status}")
             
             return df
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
-    def get_member_picked_videos(self, limit: int = 50, include_details: bool = False) -> pd.DataFrame:
+    def get_member_picked_videos(
+        self, 
+        limit: int = 50, 
+        include_details: bool = False,
+        download_thumbnails: bool = False,
+        download_videos: bool = False,
+        force_redownload: Optional[bool] = None
+    ) -> pd.DataFrame:
         """
-        Get member picked videos with optional parallel detail fetching
-        
+        Get member picked videos with optional parallel detail fetching and downloads
+     
         Note: This endpoint doesn't support pagination, so it returns up to the API's limit.
         
         Args:
             limit: Maximum number of videos to retrieve (default: 50)
             include_details: Fetch like/dislike counts and media URLs (default: False)
+            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
+            download_videos: Download video files (requires enable_downloads=True)
+            force_redownload: Override instance force_redownload setting
             
         Returns:
             DataFrame with member picked videos and consistent schema
         """
+        
         self.validator.validate_limit(limit, max_limit=100)
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         payload = {"limit": limit}
         
@@ -1317,6 +1374,15 @@ class BitChuteAPI:
             if video_ids:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(videos, details_map)
+
+        # Process downloads if requested
+        if (download_thumbnails or download_videos) and videos:
+            videos = self._process_downloads(
+                videos, 
+                download_thumbnails=download_thumbnails,
+                download_videos=download_videos,
+                force_redownload=force_redownload
+            )
         
         # Convert to DataFrame with consistent schema
         if videos:
@@ -1326,7 +1392,16 @@ class BitChuteAPI:
             
             if self.verbose:
                 detail_status = "with details" if include_details else "without details"
-                logger.info(f"Retrieved {len(df)} member picked videos {detail_status}")
+                download_status = ""
+                if download_thumbnails or download_videos:
+                    download_parts = []
+                    if download_thumbnails:
+                        download_parts.append("thumbnails")
+                    if download_videos:
+                        download_parts.append("videos")
+                    download_status = f" and downloaded {'/'.join(download_parts)}"
+                
+                logger.info(f"Retrieved {len(df)} member picked videos {detail_status}{download_status}")
             
             return df
         
@@ -1392,8 +1467,17 @@ class BitChuteAPI:
         
         return pd.DataFrame()
 
-    def get_videos_by_hashtag(self, hashtag: str, limit: int = 50, include_details: bool = False) -> pd.DataFrame:
-        """FIXED: Get hashtag videos with EXACT limit respect"""
+    def get_videos_by_hashtag(
+        self, 
+        hashtag: str, 
+        limit: int = 50, 
+        include_details: bool = False,
+        download_thumbnails: bool = False,
+        download_videos: bool = False,
+        force_redownload: Optional[bool] = None
+    ) -> pd.DataFrame:
+        """Get hashtag videos with download support and EXACT limit respect"""
+
         # Validate and clean hashtag
         if not hashtag or not isinstance(hashtag, str):
             raise ValidationError("Hashtag must be a non-empty string", "hashtag")
@@ -1411,6 +1495,10 @@ class BitChuteAPI:
         all_videos = []
         offset = 0
         per_page = 50
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         while len(all_videos) < limit:
             remaining = limit - len(all_videos)
@@ -1460,6 +1548,15 @@ class BitChuteAPI:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(all_videos, details_map)
         
+        # Process downloads if requested
+        if (download_thumbnails or download_videos) and all_videos:
+            all_videos = self._process_downloads(
+                all_videos, 
+                download_thumbnails=download_thumbnails,
+                download_videos=download_videos,
+                force_redownload=force_redownload
+            )
+
         # Convert to DataFrame with consistent schema
         if all_videos:
             video_dicts = [asdict(video) for video in all_videos]
@@ -1468,8 +1565,17 @@ class BitChuteAPI:
             
             if self.verbose:
                 detail_status = "with details" if include_details else "without details"
-                logger.info(f"Retrieved {len(df)} videos for #{clean_hashtag} {detail_status}")
-            
+                download_status = ""
+                if download_thumbnails or download_videos:
+                    download_parts = []
+                    if download_thumbnails:
+                        download_parts.append("thumbnails")
+                    if download_videos:
+                        download_parts.append("videos")
+                    download_status = f" and downloaded {'/'.join(download_parts)}"
+                
+                logger.info(f"Retrieved {len(df)} videos for #{clean_hashtag} {detail_status}{download_status}")
+
             return df
         
         return self._ensure_consistent_schema(pd.DataFrame())
@@ -1509,6 +1615,10 @@ class BitChuteAPI:
         all_videos = []
         offset = 0
         per_page = 50
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         while len(all_videos) < limit:
             remaining = limit - len(all_videos)
@@ -1701,8 +1811,18 @@ class BitChuteAPI:
     # CHANNEL FUNCTIONS
     # ================================
 
-    def get_channel_videos(self, channel_id: str, limit: int = 50, order_by: str = "latest", include_details: bool = False) -> pd.DataFrame:
-        """FIXED: Get channel videos with EXACT limit respect"""
+    def get_channel_videos(
+        self, 
+        channel_id: str, 
+        limit: int = 50, 
+        order_by: str = "latest", 
+        include_details: bool = False,
+        download_thumbnails: bool = False,
+        download_videos: bool = False,
+        force_redownload: Optional[bool] = None
+    ) -> pd.DataFrame:
+        """Get channel videos with download support and EXACT limit respect"""
+
         # Validate inputs
         if not channel_id or not isinstance(channel_id, str):
             raise ValidationError("Channel ID must be a non-empty string", "channel_id")
@@ -1713,6 +1833,10 @@ class BitChuteAPI:
         all_videos = []
         offset = 0
         per_page = 50
+
+        # Force download details if download videos is True
+        if download_videos:
+            include_details = True
         
         while len(all_videos) < limit:
             remaining = limit - len(all_videos)
@@ -1762,7 +1886,16 @@ class BitChuteAPI:
             if video_ids:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(all_videos, details_map)
-        
+
+        # Process downloads if requested
+        if (download_thumbnails or download_videos) and all_videos:
+            all_videos = self._process_downloads(
+                all_videos, 
+                download_thumbnails=download_thumbnails,
+                download_videos=download_videos,
+                force_redownload=force_redownload
+            )
+
         # Convert to DataFrame with consistent schema
         if all_videos:
             video_dicts = [asdict(video) for video in all_videos]
@@ -1771,8 +1904,17 @@ class BitChuteAPI:
             
             if self.verbose:
                 detail_status = "with details" if include_details else "without details"
-                logger.info(f"Retrieved {len(df)} videos from channel {channel_id} {detail_status}")
-            
+                download_status = ""
+                if download_thumbnails or download_videos:
+                    download_parts = []
+                    if download_thumbnails:
+                        download_parts.append("thumbnails")
+                    if download_videos:
+                        download_parts.append("videos")
+                    download_status = f" and downloaded {'/'.join(download_parts)}"
+                
+                logger.info(f"Retrieved {len(df)} videos from channel {channel_id} {detail_status}{download_status}")
+
             return df
         
         return self._ensure_consistent_schema(pd.DataFrame())
@@ -1785,7 +1927,7 @@ class BitChuteAPI:
         self, 
         video_id: str, 
         include_counts: bool = True, 
-        include_media: bool = False,
+        include_media: bool = True,
         download_thumbnails: bool = False,
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
@@ -1901,6 +2043,7 @@ class BitChuteAPI:
         if include_media:
             try:
                 media_data = self._make_request("beta/video/media", payload)
+                print(media_data)
                 if media_data:
                     video.media_url = media_data.get('media_url', '')
                     video.media_type = media_data.get('media_type', '')

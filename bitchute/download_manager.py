@@ -391,7 +391,7 @@ class MediaDownloadManager:
         self, 
         download_tasks: List[Dict[str, Any]], 
         show_progress: bool = True
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Dict[str, Optional[str]]]:
         """
         Download multiple files concurrently
         
@@ -404,7 +404,7 @@ class MediaDownloadManager:
             show_progress: Whether to show progress
             
         Returns:
-            Dictionary mapping video_id to local file path (or None if failed)
+            Dictionary mapping video_id to dict of media_type -> local file path
         """
         if not download_tasks:
             return {}
@@ -420,7 +420,7 @@ class MediaDownloadManager:
         if not valid_tasks:
             if self.verbose:
                 logger.warning("No valid download tasks provided")
-            return {task.get('video_id', ''): None for task in download_tasks}
+            return {task.get('video_id', ''): {} for task in download_tasks}
         
         if self.verbose:
             logger.info(f"Starting {len(valid_tasks)} downloads with {self.max_concurrent_downloads} workers")
@@ -434,11 +434,11 @@ class MediaDownloadManager:
             else:
                 batch_progress = DownloadProgress(total=len(valid_tasks), desc=desc)
         
-        def download_task(task: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+        def download_task(task: Dict[str, Any]) -> Tuple[str, str, Optional[str]]:
             """Download single task and return result"""
             video_id = task.get('video_id', '')
-            url = task['url']
             media_type = task.get('media_type', 'thumbnail')
+            url = task['url']
             title = task.get('title', '')
             
             try:
@@ -451,7 +451,7 @@ class MediaDownloadManager:
                 if batch_progress:
                     batch_progress.update(1)
                 
-                return video_id, str(file_path) if success else None
+                return video_id, media_type, str(file_path) if success else None
                 
             except Exception as e:
                 if self.verbose:
@@ -460,7 +460,7 @@ class MediaDownloadManager:
                 if batch_progress:
                     batch_progress.update(1)
                 
-                return video_id, None
+                return video_id, media_type, None
         
         # Execute downloads concurrently
         with ThreadPoolExecutor(max_workers=self.max_concurrent_downloads) as executor:
@@ -470,8 +470,10 @@ class MediaDownloadManager:
             }
             
             for future in as_completed(future_to_task):
-                video_id, file_path = future.result()
-                results[video_id] = file_path
+                video_id, media_type, file_path = future.result()
+                if video_id not in results:
+                    results[video_id] = {}
+                results[video_id][media_type] = file_path
         
         if batch_progress:
             batch_progress.close()
@@ -479,11 +481,18 @@ class MediaDownloadManager:
         # Add None results for invalid tasks
         for task in download_tasks:
             video_id = task.get('video_id', '')
+            media_type = task.get('media_type', 'thumbnail')
             if video_id not in results:
-                results[video_id] = None
+                results[video_id] = {}
+            if media_type not in results[video_id]:
+                results[video_id][media_type] = None
         
         if self.verbose:
-            successful_count = sum(1 for path in results.values() if path is not None)
+            successful_count = sum(
+                1 for video_results in results.values() 
+                for path in video_results.values() 
+                if path is not None
+            )
             logger.info(f"Batch download completed: {successful_count}/{len(download_tasks)} successful")
         
         return results
