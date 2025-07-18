@@ -1,8 +1,144 @@
-beautifulsoup4
-markdownify
-pandas
-python-dateutil
-retrying
-selenium
-tqdm
-webdriver-manager
+# BitChute Scraper Requirements
+# Core dependencies for basic functionality
+
+# ============================================================================
+# CORE DEPENDENCIES (Required for basic functionality)
+# ============================================================================
+
+# HTTP requests and web communication
+requests>=2.28.0
+
+# Data processing and analysis
+pandas>=1.5.0
+python-dateutil>=2.8.0
+
+# Retry logic for robust API calls
+retrying>=1.3.0
+
+# ============================================================================
+# SELENIUM DEPENDENCIES (Required for token extraction)
+# ============================================================================
+
+# Web browser automation for token extraction
+selenium>=4.10.0
+webdriver-manager>=3.8.0
+
+# ============================================================================
+# DOWNLOAD DEPENDENCIES (Required for media downloads)
+# ============================================================================
+
+# HTTP connection pooling and SSL handling
+urllib3>=1.26.0
+
+# ============================================================================
+# EXPORT DEPENDENCIES (Required for data export)
+# ============================================================================
+
+# Excel file export support
+openpyxl>=3.0.0
+
+# ============================================================================
+# OPTIONAL DEPENDENCIES (Enhance functionality but not strictly required)
+# ============================================================================
+
+# Progress bars for downloads and processing
+tqdm>=4.64.0
+
+# Fast columnar data format (Parquet)
+pyarrow>=10.0.0
+
+# System monitoring and resource usage
+psutil>=5.8.0
+
+# YAML configuration file support
+pyyaml>=6.0
+
+# ============================================================================
+# DEVELOPMENT DEPENDENCIES (Only needed for development)
+# ============================================================================
+
+# Testing framework and utilities
+pytest>=7.0.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0
+
+# Code formatting and quality
+black>=22.0.0
+flake8>=5.0.0
+mypy>=1.0.0
+
+# Type stubs for better type checking
+types-requests>=2.28.0
+types-python-dateutil>=2.8.0
+
+# ============================================================================
+# DOCUMENTATION DEPENDENCIES (Only needed for building docs)
+# ============================================================================
+
+# Documentation generation
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.0.0
+myst-parser>=0.18.0
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+#
+# Basic installation (minimum requirements):
+#   pip install bitchute-scraper
+#
+# Full installation (all features):
+#   pip install bitchute-scraper[full]
+#
+# Development installation:
+#   pip install bitchute-scraper[dev]
+#   pip install -e .[dev]  # If installing from source
+#
+# Specific features:
+#   pip install bitchute-scraper[progress]    # Progress bars
+#   pip install bitchute-scraper[fast]        # Fast data formats
+#   pip install bitchute-scraper[monitoring]  # System monitoring
+#   pip install bitchute-scraper[config]      # YAML configuration
+#
+# Documentation building:
+#   pip install bitchute-scraper[docs]
+#
+# Testing only:
+#   pip install bitchute-scraper[test]
+#
+# Code quality tools:
+#   pip install bitchute-scraper[lint]
+#
+# ============================================================================
+# VERSION COMPATIBILITY
+# ============================================================================
+#
+# Python: >=3.7
+# 
+# Tested on:
+# - Python 3.7, 3.8, 3.9, 3.10, 3.11, 3.12
+# - Windows, macOS, Linux
+# - Chrome/Chromium browsers for Selenium
+#
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# If you encounter issues with ChromeDriver:
+#   1. Ensure Chrome/Chromium is installed
+#   2. webdriver-manager will automatically handle driver downloads
+#   3. For headless environments, Chrome may need additional packages
+#
+# If pandas installation fails:
+#   - On some systems, you may need: pip install numpy first
+#   - For Apple Silicon Macs: Consider using conda or brew
+#
+# If pyarrow installation fails:
+#   - This is optional - the package works without it
+#   - Parquet export will be unavailable but other formats work
+#
+# For permission issues on Linux/macOS:
+#   - Use virtual environments: python -m venv venv && source venv/bin/activate
+#   - Avoid system Python installations
+#
+# ============================================================================

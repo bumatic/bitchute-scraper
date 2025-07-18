@@ -1,6 +1,204 @@
-# Bitcute 
+# Bitcute Analysis
 
-## Homepage
+## Bitchute Frontend API
+
+Bitchute apparently adoted VUE.js and relies on an API to populate the website with data. These frontend API calls cann bei identified observing network traffic in browser developer tools.
+
+### Baic structure of Bitchute API calls
+
+** Request header** includes a x-service-identifier that is generated upon request and probably used as authenticator. This needs to be retrieved at run time from a browser instance.
+
+The example retrieves trending videos sorted by day. 
+
+```Python
+# Request header 
+import requests
+
+headers = {
+    'accept': 'application/json, text/plain, */*',
+    'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+    'content-type': 'application/json',
+    'origin': 'https://www.bitchute.com',
+    'priority': 'u=1, i',
+    'referer': 'https://www.bitchute.com/',
+    'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+    'x-service-info': '6t5eya4t4b4lwi3zjh6dxu6y9j6i',
+}
+
+```
+
+**Endpoint:** https://api.bitchute.com/api/beta/videos
+
+**Params** for the request
+
+```Pthon
+json_data = {
+    'selection': 'trending-day',
+    'offset': 0,
+    'limit': 20,
+    'advertisable': True,
+}
+```
+
+
+    'fields': ['video_id', 'video_name']
+    
+On the fontend the sections popular (fresh), all, members picked and search support pagination. The trending sections only show 20 results at a time.
+
+Popular, all and members_picked probably also have a limit. 
+
+### Trending Videos 
+
+### Video data
+
+#### Metadata
+
+**Endpoint:** https://api.bitchute.com/api/beta9/video
+
+**Params:**
+
+```Python
+json_data = {
+    'video_id': 'CLrgZP4RWyly',
+}
+```
+
+#### Video Counts
+
+**Endpoint:** https://api.bitchute.com/api/beta/video/counts
+
+**Params:**
+
+```Python
+json_data = {
+    'video_id': 'CLrgZP4RWyly',
+}
+```
+
+#### Video Media
+
+**Endpoint:** https://api.bitchute.com/api/beta/video/media
+
+**Params:**
+
+```Python
+json_data = {
+    'video_id': 'CLrgZP4RWyly',
+}
+```
+
+### Trending and Popular (named "Fresh" on the frontend)
+
+**Endpoint:** https://api.bitchute.com/api/beta/videos
+
+**Params:**
+
+```Pthon
+json_data = {
+    'selection': 'trending-day', # or 'trending-week' or 'trending-month' or 'popular'
+    'offset': 0,
+    'limit': 20,
+    'advertisable': True,
+}
+```
+
+### Member liked videos
+
+**Endpoint:** https://api.bitchute.com/api/beta/member_liked_videos
+
+**Params:**
+
+```Pthon
+json_data = {
+    'limit': 24,
+}
+```
+
+### Shorts
+
+**Endpoint:** https://api.bitchute.com/api/beta9/video
+
+**Params:**
+
+```Python
+json_data = {
+    'selection': 'all',
+    'offset': 0,
+    'limit': 50,
+    'advertisable': True,
+    'is_short': True,
+}
+```
+
+### Trending Hashtags
+
+**Endpoint:** https://api.bitchute.com/api/beta9/hashtag/trending/
+
+**Params:**
+
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 20,
+}
+```
+
+
+### All videos
+
+**Endpoint:** https://api.bitchute.com/api/beta/videos
+
+**Params:**
+
+```Python
+json_data = {
+    'selection': 'all',
+    'offset': 0,
+    'limit': 30,
+    'advertisable': True,
+}
+```
+
+
+### Search videos
+**Endpoint:** https://api.bitchute.com/api/beta/search/videos
+
+**Params:**
+
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 50,
+    'query': 'QUERY TERM',
+    'sensitivity_id': 'normal', # or 'nsfw' or 'nsfl'
+    'sort': 'new',
+}
+```
+
+### Search Channels
+
+**Endpoint:** 
+
+**Params:**
+
+```Python
+json_data = {
+    'offset': 0,
+    'limit': 50,
+    'query': 'QUERY TERM',
+    'sensitivity_id': 'normal', # 'nsfw' or 'nsfl'
+}
+```
+
+
+
+## 2022 Homepage Structure (deprecated)
 
 The Bitchute homepage contains video listings of popular, trending and all videos as well as a carousel of recommended channels. The trending homepage also contains trending tags.
 
