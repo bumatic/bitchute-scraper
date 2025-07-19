@@ -1,5 +1,12 @@
 """
-BitChute Scraper Data Models - Enhanced with Download Support
+BitChute Scraper Data Models
+
+Comprehensive data models for BitChute platform entities including videos,
+channels, hashtags, and search results with computed properties and download support.
+
+This module provides structured data representations for all BitChute platform
+entities with automatic field validation, computed properties, and support for
+media downloads.
 """
 
 from dataclasses import dataclass, field
@@ -8,7 +15,57 @@ from datetime import datetime, timezone
 
 @dataclass
 class Video:
-    """Video data model with comprehensive fields and download support"""
+    """Comprehensive video data model with engagement metrics and download support.
+    
+    Represents a BitChute video with complete metadata, engagement statistics,
+    and local file paths for downloaded media. Includes computed properties
+    for analysis and data processing.
+    
+    Attributes:
+        id: Unique video identifier
+        title: Video title
+        description: Video description text
+        view_count: Number of video views
+        like_count: Number of likes received
+        dislike_count: Number of dislikes received
+        duration: Video duration string (e.g., "12:34" or "1:23:45")
+        thumbnail_url: URL to video thumbnail image
+        video_url: URL to video page on BitChute
+        media_url: Direct URL to video media file
+        media_type: MIME type of video file
+        channel_id: Unique identifier of uploading channel
+        channel_name: Name of uploading channel
+        profile_id: Profile ID of channel owner
+        category: Video category name
+        category_id: Video category identifier
+        sensitivity: Content sensitivity level
+        hashtags: List of associated hashtags
+        state: Video publication state
+        is_short: Whether video is classified as short-form content
+        is_liked: Whether current user has liked video
+        is_disliked: Whether current user has disliked video
+        is_discussable: Whether comments are enabled
+        show_comments: Whether comments section is visible
+        show_adverts: Whether advertisements are enabled
+        show_promo: Whether promotional content is shown
+        show_rantrave: Whether rant/rave feature is enabled
+        upload_date: ISO format upload timestamp
+        scrape_timestamp: Unix timestamp when data was collected
+        rumble_id: Associated Rumble platform identifier
+        local_thumbnail_path: Local file path to downloaded thumbnail
+        local_video_path: Local file path to downloaded video file
+    
+    Example:
+        >>> video = Video()
+        >>> video.id = "CLrgZP4RWyly"
+        >>> video.title = "Sample Video"
+        >>> video.view_count = 1500
+        >>> video.like_count = 45
+        >>> video.dislike_count = 3
+        >>> print(f"Engagement rate: {video.engagement_rate:.2%}")
+        >>> print(f"Like ratio: {video.like_ratio:.2%}")
+    """
+    
     # Core identifiers
     id: str = ""
     title: str = ""
@@ -38,7 +95,7 @@ class Video:
     hashtags: List[str] = field(default_factory=list)
     
     # Status and flags
-    state: str = ""  # published, etc.
+    state: str = ""
     is_short: bool = False
     is_liked: bool = False
     is_disliked: bool = False
@@ -57,12 +114,16 @@ class Video:
     # External IDs
     rumble_id: str = ""
     
-    # NEW: Download-related fields
+    # Download-related fields
     local_thumbnail_path: str = ""
     local_video_path: str = ""
     
     def __post_init__(self):
-        """Initialize computed fields"""
+        """Initialize computed fields and set default values.
+        
+        Sets scrape timestamp to current time if not provided and constructs
+        video URL from ID if not already set.
+        """
         if not self.scrape_timestamp:
             self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
@@ -71,14 +132,37 @@ class Video:
     
     @property
     def engagement_rate(self) -> float:
-        """Calculate engagement rate (likes + dislikes) / views"""
+        """Calculate engagement rate as proportion of views.
+        
+        Returns:
+            float: Engagement rate calculated as (likes + dislikes) / views.
+                Returns 0.0 if view count is zero.
+                
+        Example:
+            >>> video = Video()
+            >>> video.view_count = 1000
+            >>> video.like_count = 50
+            >>> video.dislike_count = 5
+            >>> print(f"{video.engagement_rate:.1%}")  # "5.5%"
+        """
         if self.view_count == 0:
             return 0.0
         return (self.like_count + self.dislike_count) / self.view_count
     
     @property
     def like_ratio(self) -> float:
-        """Calculate like ratio: likes / (likes + dislikes)"""
+        """Calculate like ratio among total reactions.
+        
+        Returns:
+            float: Like ratio calculated as likes / (likes + dislikes).
+                Returns 0.0 if no reactions exist.
+                
+        Example:
+            >>> video = Video()
+            >>> video.like_count = 80
+            >>> video.dislike_count = 20
+            >>> print(f"{video.like_ratio:.1%}")  # "80.0%"
+        """
         total_reactions = self.like_count + self.dislike_count
         if total_reactions == 0:
             return 0.0
@@ -86,16 +170,30 @@ class Video:
     
     @property
     def duration_seconds(self) -> int:
-        """Convert duration string to seconds"""
+        """Convert duration string to total seconds.
+        
+        Parses duration strings in MM:SS or HH:MM:SS format and converts
+        to total seconds for numerical analysis.
+        
+        Returns:
+            int: Total duration in seconds. Returns 0 if parsing fails.
+            
+        Example:
+            >>> video = Video()
+            >>> video.duration = "12:34"
+            >>> print(video.duration_seconds)  # 754
+            >>> video.duration = "1:23:45"
+            >>> print(video.duration_seconds)  # 5025
+        """
         if not self.duration:
             return 0
         
         try:
             parts = self.duration.split(':')
-            if len(parts) == 2:  # MM:SS
+            if len(parts) == 2:  # MM:SS format
                 minutes, seconds = map(int, parts)
                 return minutes * 60 + seconds
-            elif len(parts) == 3:  # HH:MM:SS
+            elif len(parts) == 3:  # HH:MM:SS format
                 hours, minutes, seconds = map(int, parts)
                 return hours * 3600 + minutes * 60 + seconds
         except (ValueError, AttributeError):
@@ -105,21 +203,65 @@ class Video:
     
     @property
     def has_local_thumbnail(self) -> bool:
-        """Check if thumbnail has been downloaded locally"""
+        """Check if thumbnail has been downloaded locally.
+        
+        Returns:
+            bool: True if local thumbnail path is set and non-empty.
+            
+        Example:
+            >>> video = Video()
+            >>> print(video.has_local_thumbnail)  # False
+            >>> video.local_thumbnail_path = "/path/to/thumb.jpg"
+            >>> print(video.has_local_thumbnail)  # True
+        """
         return bool(self.local_thumbnail_path and self.local_thumbnail_path.strip())
     
     @property
     def has_local_video(self) -> bool:
-        """Check if video has been downloaded locally"""
+        """Check if video file has been downloaded locally.
+        
+        Returns:
+            bool: True if local video path is set and non-empty.
+            
+        Example:
+            >>> video = Video()
+            >>> print(video.has_local_video)  # False
+            >>> video.local_video_path = "/path/to/video.mp4"
+            >>> print(video.has_local_video)  # True
+        """
         return bool(self.local_video_path and self.local_video_path.strip())
     
     @property
     def is_fully_downloaded(self) -> bool:
-        """Check if both thumbnail and video are downloaded"""
+        """Check if both thumbnail and video are downloaded locally.
+        
+        Returns:
+            bool: True if both thumbnail and video files are available locally.
+            
+        Example:
+            >>> video = Video()
+            >>> video.local_thumbnail_path = "/path/to/thumb.jpg"
+            >>> video.local_video_path = "/path/to/video.mp4"
+            >>> print(video.is_fully_downloaded)  # True
+        """
         return self.has_local_thumbnail and self.has_local_video
     
     def to_dict(self) -> dict:
-        """Convert to dictionary with computed properties"""
+        """Convert video object to dictionary with computed properties.
+        
+        Creates a comprehensive dictionary representation including all
+        fields and computed properties for serialization or analysis.
+        
+        Returns:
+            dict: Dictionary containing all video data and computed properties.
+            
+        Example:
+            >>> video = Video()
+            >>> video.id = "test123"
+            >>> video.view_count = 1000
+            >>> data = video.to_dict()
+            >>> print(data['engagement_rate'])
+        """
         data = {
             'id': self.id,
             'title': self.title,
@@ -154,7 +296,6 @@ class Video:
             'like_ratio': self.like_ratio,
             'rumble_id': self.rumble_id,
             'scrape_timestamp': self.scrape_timestamp,
-            # NEW: Download fields
             'local_thumbnail_path': self.local_thumbnail_path,
             'local_video_path': self.local_video_path,
             'has_local_thumbnail': self.has_local_thumbnail,
@@ -165,7 +306,55 @@ class Video:
 
 @dataclass
 class Channel:
-    """Channel data model with comprehensive fields"""
+    """Comprehensive channel data model with statistics and social links.
+    
+    Represents a BitChute channel with complete metadata, statistics,
+    and configuration settings. Includes computed properties for analytics
+    and social media link tracking.
+    
+    Attributes:
+        id: Unique channel identifier
+        name: Channel display name
+        description: Channel description text
+        url_slug: URL-friendly channel identifier
+        video_count: Total number of uploaded videos
+        subscriber_count: Subscriber count (may be formatted string)
+        view_count: Total views across all videos
+        created_date: Channel creation date
+        last_video_published: Date of most recent video upload
+        profile_id: Associated profile identifier
+        profile_name: Profile display name
+        category: Channel category name
+        category_id: Channel category identifier
+        sensitivity: Content sensitivity level
+        sensitivity_id: Sensitivity level identifier
+        thumbnail_url: Channel thumbnail/avatar URL
+        channel_url: Full URL to channel page
+        state: Channel status/state
+        state_id: Channel state identifier
+        membership_level: Channel membership tier
+        is_verified: Whether channel is verified
+        is_subscribed: Whether current user is subscribed
+        is_notified: Whether notifications are enabled
+        show_adverts: Whether advertisements are enabled
+        show_comments: Whether comments are enabled
+        show_rantrave: Whether rant/rave feature is enabled
+        live_stream_enabled: Whether live streaming is available
+        feature_video: Featured video identifier
+        scrape_timestamp: Unix timestamp when data was collected
+        social_links: List of social media links (populated by API)
+    
+    Example:
+        >>> channel = Channel()
+        >>> channel.id = "test_channel"
+        >>> channel.name = "Test Channel"
+        >>> channel.subscriber_count = "1.2K"
+        >>> channel.video_count = 150
+        >>> channel.view_count = 500000
+        >>> print(f"Numeric subscribers: {channel.subscriber_count_numeric}")
+        >>> print(f"Avg views per video: {channel.average_views_per_video:.0f}")
+    """
+    
     # Core identifiers
     id: str = ""
     name: str = ""
@@ -215,8 +404,15 @@ class Channel:
     # Metadata
     scrape_timestamp: float = 0.0
     
+    # Social media links (populated by API)
+    social_links: List[dict] = field(default_factory=list)
+    
     def __post_init__(self):
-        """Initialize computed fields"""
+        """Initialize computed fields and set default values.
+        
+        Sets scrape timestamp to current time if not provided and constructs
+        channel URL from ID if not already set.
+        """
         if not self.scrape_timestamp:
             self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
@@ -225,7 +421,21 @@ class Channel:
     
     @property
     def subscriber_count_numeric(self) -> int:
-        """Convert subscriber count string to numeric value"""
+        """Convert formatted subscriber count to numeric value.
+        
+        Parses subscriber count strings with K/M suffixes and converts
+        to numeric values for analysis and sorting.
+        
+        Returns:
+            int: Numeric subscriber count. Returns 0 if parsing fails.
+            
+        Example:
+            >>> channel = Channel()
+            >>> channel.subscriber_count = "1.2K"
+            >>> print(channel.subscriber_count_numeric)  # 1200
+            >>> channel.subscriber_count = "2.5M"
+            >>> print(channel.subscriber_count_numeric)  # 2500000
+        """
         if not self.subscriber_count:
             return 0
         
@@ -244,13 +454,37 @@ class Channel:
     
     @property
     def average_views_per_video(self) -> float:
-        """Calculate average views per video"""
+        """Calculate average views per video across channel.
+        
+        Returns:
+            float: Average view count per video. Returns 0.0 if no videos exist.
+            
+        Example:
+            >>> channel = Channel()
+            >>> channel.view_count = 100000
+            >>> channel.video_count = 50
+            >>> print(channel.average_views_per_video)  # 2000.0
+        """
         if self.video_count == 0:
             return 0.0
         return self.view_count / self.video_count
     
     def to_dict(self) -> dict:
-        """Convert to dictionary with computed properties"""
+        """Convert channel object to dictionary with computed properties.
+        
+        Creates a comprehensive dictionary representation including all
+        fields and computed properties for serialization or analysis.
+        
+        Returns:
+            dict: Dictionary containing all channel data and computed properties.
+            
+        Example:
+            >>> channel = Channel()
+            >>> channel.id = "test123"
+            >>> channel.subscriber_count = "5.5K"
+            >>> data = channel.to_dict()
+            >>> print(data['subscriber_count_numeric'])  # 5500
+        """
         return {
             'id': self.id,
             'name': self.name,
@@ -282,12 +516,32 @@ class Channel:
             'show_rantrave': self.show_rantrave,
             'live_stream_enabled': self.live_stream_enabled,
             'feature_video': self.feature_video,
-            'scrape_timestamp': self.scrape_timestamp
+            'scrape_timestamp': self.scrape_timestamp,
+            'social_links': self.social_links
         }
 
 @dataclass
 class Hashtag:
-    """Hashtag data model"""
+    """Hashtag data model with ranking and usage statistics.
+    
+    Represents a BitChute hashtag with trend ranking and associated
+    video count information.
+    
+    Attributes:
+        name: Hashtag name (with or without # prefix)
+        url: Full URL to hashtag page
+        rank: Trending rank position
+        video_count: Number of videos using this hashtag
+        scrape_timestamp: Unix timestamp when data was collected
+    
+    Example:
+        >>> hashtag = Hashtag()
+        >>> hashtag.name = "bitcoin"
+        >>> hashtag.rank = 5
+        >>> hashtag.video_count = 142
+        >>> print(hashtag.formatted_name)  # "#bitcoin"
+        >>> print(hashtag.clean_name)      # "bitcoin"
+    """
     name: str = ""
     url: str = ""
     rank: int = 0
@@ -295,7 +549,11 @@ class Hashtag:
     scrape_timestamp: float = 0.0
     
     def __post_init__(self):
-        """Initialize computed fields"""
+        """Initialize computed fields and set default values.
+        
+        Sets scrape timestamp to current time if not provided and constructs
+        hashtag URL from name if not already set.
+        """
         if not self.scrape_timestamp:
             self.scrape_timestamp = datetime.now(timezone.utc).timestamp()
         
@@ -305,18 +563,40 @@ class Hashtag:
     
     @property
     def clean_name(self) -> str:
-        """Get hashtag name without # prefix"""
+        """Get hashtag name without # prefix.
+        
+        Returns:
+            str: Hashtag name with # prefix removed.
+            
+        Example:
+            >>> hashtag = Hashtag()
+            >>> hashtag.name = "#bitcoin"
+            >>> print(hashtag.clean_name)  # "bitcoin"
+        """
         return self.name.lstrip('#') if self.name else ""
     
     @property
     def formatted_name(self) -> str:
-        """Get hashtag name with # prefix"""
+        """Get hashtag name with # prefix.
+        
+        Returns:
+            str: Hashtag name with # prefix added if not present.
+            
+        Example:
+            >>> hashtag = Hashtag()
+            >>> hashtag.name = "bitcoin"
+            >>> print(hashtag.formatted_name)  # "#bitcoin"
+        """
         if not self.name:
             return ""
         return f"#{self.clean_name}" if not self.name.startswith('#') else self.name
     
     def to_dict(self) -> dict:
-        """Convert to dictionary"""
+        """Convert hashtag object to dictionary with computed properties.
+        
+        Returns:
+            dict: Dictionary containing all hashtag data and computed properties.
+        """
         return {
             'name': self.name,
             'clean_name': self.clean_name,
@@ -329,20 +609,58 @@ class Hashtag:
 
 @dataclass 
 class Profile:
-    """Profile data model (for channel owners)"""
+    """Profile data model for channel owners.
+    
+    Represents a BitChute user profile associated with channels.
+    
+    Attributes:
+        profile_id: Unique profile identifier
+        profile_name: Profile display name
+        profile_url: Full URL to profile page
+        profile_thumbnail_url: Profile avatar/thumbnail URL
+    
+    Example:
+        >>> profile = Profile()
+        >>> profile.profile_id = "abc123"
+        >>> profile.profile_name = "Content Creator"
+        >>> print(profile.profile_url)
+    """
     profile_id: str = ""
     profile_name: str = ""
     profile_url: str = ""
     profile_thumbnail_url: str = ""
     
     def __post_init__(self):
-        """Initialize computed fields"""
+        """Initialize computed fields.
+        
+        Constructs profile URL from ID if not already set.
+        """
         if not self.profile_url and self.profile_id:
             self.profile_url = f"https://www.bitchute.com/profile/{self.profile_id}/"
 
 @dataclass
 class SearchResult:
-    """Search result container"""
+    """Search result container with metadata.
+    
+    Container for search operation results including videos and channels
+    with search metadata and pagination information.
+    
+    Attributes:
+        query: Original search query string
+        total_results: Total number of results available
+        results_per_page: Number of results per page
+        current_page: Current page number
+        videos: List of video results
+        channels: List of channel results
+        search_timestamp: Unix timestamp when search was performed
+    
+    Example:
+        >>> result = SearchResult()
+        >>> result.query = "bitcoin"
+        >>> result.videos = [video1, video2]
+        >>> print(f"Found {result.video_count} videos")
+        >>> print(f"Has results: {result.has_results}")
+    """
     query: str = ""
     total_results: int = 0
     results_per_page: int = 0
@@ -352,28 +670,62 @@ class SearchResult:
     search_timestamp: float = 0.0
     
     def __post_init__(self):
-        """Initialize timestamp"""
+        """Initialize timestamp if not provided."""
         if not self.search_timestamp:
             self.search_timestamp = datetime.now(timezone.utc).timestamp()
     
     @property
     def has_results(self) -> bool:
-        """Check if search returned any results"""
+        """Check if search returned any results.
+        
+        Returns:
+            bool: True if videos or channels were found.
+        """
         return len(self.videos) > 0 or len(self.channels) > 0
     
     @property
     def video_count(self) -> int:
-        """Number of videos in results"""
+        """Number of videos in results.
+        
+        Returns:
+            int: Count of video results.
+        """
         return len(self.videos)
     
     @property
     def channel_count(self) -> int:
-        """Number of channels in results"""
+        """Number of channels in results.
+        
+        Returns:
+            int: Count of channel results.
+        """
         return len(self.channels)
 
 @dataclass
 class APIStats:
-    """API usage statistics"""
+    """API usage statistics and performance metrics.
+    
+    Tracks API usage patterns, performance metrics, and session statistics
+    for monitoring and optimization purposes.
+    
+    Attributes:
+        requests_made: Total number of API requests made
+        successful_requests: Number of successful requests
+        failed_requests: Number of failed requests
+        cache_hits: Number of cache hits
+        total_videos_scraped: Total videos collected
+        total_channels_scraped: Total channels collected
+        total_hashtags_scraped: Total hashtags collected
+        session_start_time: Unix timestamp when session started
+        last_request_time: Unix timestamp of most recent request
+    
+    Example:
+        >>> stats = APIStats()
+        >>> stats.requests_made = 100
+        >>> stats.successful_requests = 95
+        >>> print(f"Success rate: {stats.success_rate:.1%}")
+        >>> print(f"Session duration: {stats.session_duration:.0f} seconds")
+    """
     requests_made: int = 0
     successful_requests: int = 0
     failed_requests: int = 0
@@ -385,27 +737,39 @@ class APIStats:
     last_request_time: float = 0.0
     
     def __post_init__(self):
-        """Initialize timestamps"""
+        """Initialize session start time if not provided."""
         if not self.session_start_time:
             self.session_start_time = datetime.now(timezone.utc).timestamp()
     
     @property
     def success_rate(self) -> float:
-        """Calculate request success rate"""
+        """Calculate request success rate.
+        
+        Returns:
+            float: Success rate as proportion of total requests.
+        """
         if self.requests_made == 0:
             return 0.0
         return self.successful_requests / self.requests_made
     
     @property
     def error_rate(self) -> float:
-        """Calculate request error rate"""
+        """Calculate request error rate.
+        
+        Returns:
+            float: Error rate as proportion of total requests.
+        """
         if self.requests_made == 0:
             return 0.0
         return self.failed_requests / self.requests_made
     
     @property
     def cache_hit_rate(self) -> float:
-        """Calculate cache hit rate"""
+        """Calculate cache hit rate.
+        
+        Returns:
+            float: Cache hit rate as proportion of total attempts.
+        """
         total_attempts = self.requests_made + self.cache_hits
         if total_attempts == 0:
             return 0.0
@@ -413,12 +777,20 @@ class APIStats:
     
     @property
     def session_duration(self) -> float:
-        """Session duration in seconds"""
+        """Calculate session duration in seconds.
+        
+        Returns:
+            float: Duration of current session in seconds.
+        """
         current_time = self.last_request_time if self.last_request_time else datetime.now(timezone.utc).timestamp()
         return current_time - self.session_start_time
     
     def to_dict(self) -> dict:
-        """Convert to dictionary"""
+        """Convert statistics to dictionary format.
+        
+        Returns:
+            dict: Complete statistics including computed metrics.
+        """
         return {
             'requests_made': self.requests_made,
             'successful_requests': self.successful_requests,
@@ -437,7 +809,29 @@ class APIStats:
 
 @dataclass
 class DownloadResult:
-    """NEW: Download operation result"""
+    """Download operation result with file information and statistics.
+    
+    Represents the result of a media download operation including
+    success status, file paths, and performance metrics.
+    
+    Attributes:
+        video_id: Video identifier for downloaded content
+        success: Whether download operation succeeded
+        thumbnail_path: Local path to downloaded thumbnail
+        video_path: Local path to downloaded video file
+        error_message: Error description if download failed
+        download_time: Time taken for download in seconds
+        file_size_bytes: Total size of downloaded files in bytes
+    
+    Example:
+        >>> result = DownloadResult()
+        >>> result.video_id = "abc123"
+        >>> result.success = True
+        >>> result.thumbnail_path = "/downloads/thumb.jpg"
+        >>> result.file_size_bytes = 1048576
+        >>> print(f"Downloaded: {result.file_size_formatted}")
+        >>> print(f"Has thumbnail: {result.has_thumbnail}")
+    """
     video_id: str = ""
     success: bool = False
     thumbnail_path: Optional[str] = None
@@ -448,28 +842,50 @@ class DownloadResult:
     
     @property
     def has_thumbnail(self) -> bool:
-        """Check if thumbnail was downloaded"""
+        """Check if thumbnail was downloaded.
+        
+        Returns:
+            bool: True if thumbnail path is set.
+        """
         return self.thumbnail_path is not None
     
     @property
     def has_video(self) -> bool:
-        """Check if video was downloaded"""
+        """Check if video was downloaded.
+        
+        Returns:
+            bool: True if video path is set.
+        """
         return self.video_path is not None
     
     @property
     def file_size_formatted(self) -> str:
-        """Get formatted file size"""
+        """Get human-readable file size.
+        
+        Returns:
+            str: Formatted file size with appropriate units.
+            
+        Example:
+            >>> result = DownloadResult()
+            >>> result.file_size_bytes = 1048576
+            >>> print(result.file_size_formatted)  # "1.0 MB"
+        """
         if self.file_size_bytes == 0:
             return "0 B"
         
+        size = self.file_size_bytes
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if self.file_size_bytes < 1024:
-                return f"{self.file_size_bytes:.1f} {unit}"
-            self.file_size_bytes /= 1024
-        return f"{self.file_size_bytes:.1f} TB"
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
     
     def to_dict(self) -> dict:
-        """Convert to dictionary"""
+        """Convert download result to dictionary format.
+        
+        Returns:
+            dict: Complete download result including computed properties.
+        """
         return {
             'video_id': self.video_id,
             'success': self.success,
