@@ -44,8 +44,6 @@ Contents
    
    installation
    quickstart
-   tutorials/index
-   configuration
    cli
 
 .. toctree::
@@ -54,26 +52,6 @@ Contents
    
    api/core
    api/models
-   api/utils
-   api/exceptions
-   api/cli
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Examples
-   
-   examples/basic_usage
-   examples/downloads
-   examples/data_analysis
-   examples/automation
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Development
-   
-   contributing
-   changelog
-   license
 
 API Overview
 ------------
