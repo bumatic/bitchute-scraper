@@ -1,5 +1,7 @@
 """
-BitChute Scraper Core
+BitChute Scraper Core API Client
+
+This module provides the main BitChuteAPI class for interacting with the BitChute platform.
 """
 
 import time
@@ -27,26 +29,25 @@ from .utils import DataProcessor, RateLimiter, RequestBuilder
 from .validators import InputValidator
 from .download_manager import MediaDownloadManager
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 
 class SensitivityLevel(Enum):
-    """Content sensitivity levels"""
+    """Content sensitivity levels for search results."""
     NORMAL = "normal"
     NSFW = "nsfw" 
     NSFL = "nsfl"
 
 
 class SortOrder(Enum):
-    """Video sort orders"""
+    """Video sort orders for search results."""
     NEW = "new"
     OLD = "old"
     VIEWS = "views"
 
 
 class VideoSelection(Enum):
-    """Video selection types"""
+    """Video selection types for trending videos."""
     TRENDING_DAY = "trending-day"
     TRENDING_WEEK = "trending-week"
     TRENDING_MONTH = "trending-month"
@@ -56,7 +57,30 @@ class VideoSelection(Enum):
 
 class BitChuteAPI:
     """
-    BitChute API client
+    BitChute API client for scraping video, channel, and platform data.
+    
+    This client provides methods to access BitChute's video listings, search functionality,
+    and individual video/channel details. It supports automatic downloading of thumbnails
+    and videos when enabled.
+    
+    Args:
+        verbose: Enable verbose logging output.
+        cache_tokens: Cache authentication tokens to disk.
+        rate_limit: Minimum seconds between API requests.
+        timeout: Request timeout in seconds.
+        max_retries: Maximum retry attempts for failed requests.
+        max_workers: Maximum concurrent workers for parallel operations.
+        enable_downloads: Enable automatic media downloads.
+        download_base_dir: Base directory for downloads.
+        thumbnail_folder: Subdirectory for thumbnails.
+        video_folder: Subdirectory for videos.
+        force_redownload: Force redownload of existing files.
+        max_concurrent_downloads: Maximum concurrent downloads.
+    
+    Example:
+        >>> api = BitChuteAPI(verbose=True)
+        >>> trending = api.get_trending_videos('day', limit=10)
+        >>> print(f"Found {len(trending)} trending videos")
     """
     
     def __init__(
@@ -74,44 +98,24 @@ class BitChuteAPI:
         force_redownload: bool = False,
         max_concurrent_downloads: int = 3
     ):
-        """
-        Initialize BitChute API client with optional download functionality
-        
-        Args:
-            verbose: Enable verbose logging
-            cache_tokens: Cache authentication tokens
-            rate_limit: Seconds between requests
-            timeout: Request timeout in seconds
-            max_retries: Maximum retry attempts
-            max_workers: Maximum concurrent workers for parallel operations
-            
-            # Download Configuration
-            enable_downloads: Enable automatic media downloads
-            download_base_dir: Base directory for downloads
-            thumbnail_folder: Subdirectory for thumbnails
-            video_folder: Subdirectory for videos
-            force_redownload: Force redownload of existing files
-            max_concurrent_downloads: Maximum concurrent downloads
-        """
+        """Initialize BitChute API client with configuration options."""
         self.verbose = verbose
         self.timeout = timeout
         self.max_retries = max_retries
         self.max_workers = max_workers
-        
-        # NEW: Download configuration
         self.enable_downloads = enable_downloads
         
         # Initialize logging
         self._setup_logging()
         
-        # Initialize components
+        # Initialize core components
         self.token_manager = TokenManager(cache_tokens, verbose)
         self.rate_limiter = RateLimiter(rate_limit)
         self.request_builder = RequestBuilder()
         self.data_processor = DataProcessor()
         self.validator = InputValidator()
         
-        # NEW: Initialize download manager if downloads are enabled
+        # Initialize download manager if enabled
         if self.enable_downloads:
             self.download_manager = MediaDownloadManager(
                 base_dir=download_base_dir,
@@ -128,10 +132,7 @@ class BitChuteAPI:
         else:
             self.download_manager = None
         
-        # API configuration
         self.base_url = "https://api.bitchute.com/api"
-        
-        # Setup requests session with optimized settings
         self.session = self._create_session()
         
         # Statistics tracking
@@ -143,23 +144,21 @@ class BitChuteAPI:
         }
     
     def _setup_logging(self):
-        """Configure logging based on verbosity"""
+        """Configure logging based on verbosity setting."""
         level = logging.INFO if self.verbose else logging.WARNING
         logging.basicConfig(
             level=level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         
-        # Suppress noisy loggers when not verbose
         if not self.verbose:
             for logger_name in ['selenium', 'urllib3', 'WDM']:
                 logging.getLogger(logger_name).setLevel(logging.WARNING)
     
     def _create_session(self) -> requests.Session:
-        """Create optimized requests session"""
+        """Create optimized requests session with retry configuration."""
         session = requests.Session()
         
-        # Set headers
         session.headers.update({
             'accept': 'application/json, text/plain, */*',
             'accept-language': 'en-US,en;q=0.9',
@@ -196,15 +195,27 @@ class BitChuteAPI:
         payload: Dict[str, Any], 
         require_token: bool = True
     ) -> Optional[Dict[str, Any]]:
-        """Make API request with enhanced error handling and retries"""
-        # Validate inputs
+        """
+        Make authenticated API request with error handling and retries.
+        
+        Args:
+            endpoint: API endpoint path.
+            payload: Request payload data.
+            require_token: Whether authentication token is required.
+            
+        Returns:
+            Response data as dictionary, or None if request failed.
+            
+        Raises:
+            BitChuteAPIError: When API request fails.
+            RateLimitError: When rate limit is exceeded.
+            ValidationError: When input validation fails.
+        """
         self.validator.validate_endpoint(endpoint)
         self.validator.validate_payload(payload)
         
-        # Apply rate limiting
         self.rate_limiter.wait()
         
-        # Get authentication token if required
         if require_token:
             token = self.token_manager.get_token()
             if token:
@@ -224,11 +235,9 @@ class BitChuteAPI:
                 timeout=self.timeout
             )
             
-            # Update statistics
             self.stats['requests_made'] += 1
             self.stats['last_request_time'] = time.time()
 
-            # Handle different response codes
             if response.status_code == 200:
                 return response.json()
             
@@ -237,7 +246,6 @@ class BitChuteAPI:
                 raise RateLimitError("Rate limit exceeded")
             
             elif response.status_code in [401, 403] and require_token:
-                # Token might be invalid, try refresh once
                 logger.info("Token invalid, attempting refresh")
                 self.token_manager.invalidate_token()
                 token = self.token_manager.get_token()
@@ -252,7 +260,6 @@ class BitChuteAPI:
                     if response.status_code == 200:
                         return response.json()
             
-            # Log error and update stats
             self.stats['errors'] += 1
             error_msg = f"API error: {endpoint} - {response.status_code}"
             
@@ -292,7 +299,13 @@ class BitChuteAPI:
 
     def _fetch_details_parallel(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """
-        FIXED: Fetch details including hashtags from individual video endpoints
+        Fetch video details including counts, media URLs, and hashtags in parallel.
+        
+        Args:
+            video_ids: List of video IDs to process.
+            
+        Returns:
+            Dictionary mapping video IDs to their detailed information.
         """
         if not video_ids:
             return {}
@@ -303,7 +316,6 @@ class BitChuteAPI:
         start_time = time.time()
         details_map = {}
         
-        # Initialize all video IDs in results
         for video_id in video_ids:
             details_map[video_id] = {
                 'video_id': video_id,
@@ -312,7 +324,7 @@ class BitChuteAPI:
                 'view_count': 0,
                 'media_url': '',
                 'media_type': '',
-                'hashtags': []  # ADD hashtags field
+                'hashtags': []
             }
         
         # Temporarily reduce rate limiting for parallel operations
@@ -320,12 +332,12 @@ class BitChuteAPI:
         self.rate_limiter.rate_limit = 0.02
         
         try:
-            # BATCH 1: Fetch counts AND hashtags from individual video details
+            # Batch 1: Fetch counts and hashtags
             if self.verbose:
                 logger.info("Batch 1: Fetching counts and hashtags...")
             
             def fetch_counts_and_hashtags(video_id: str) -> Dict[str, Any]:
-                """Fetch counts AND hashtags for a single video"""
+                """Fetch counts and hashtags for a single video."""
                 try:
                     payload = {"video_id": video_id}
                     result = {'video_id': video_id}
@@ -339,13 +351,12 @@ class BitChuteAPI:
                             'view_count': int(counts_data.get('view_count', 0) or 0)
                         })
                     
-                    # Get hashtags from individual video details
+                    # Get hashtags from video details
                     video_details = self._make_request("beta9/video", payload, require_token=False)
                     if video_details and 'hashtags' in video_details:
                         hashtags = []
                         for tag in video_details['hashtags']:
                             if isinstance(tag, str) and tag.strip():
-                                # Format as #hashtag
                                 formatted_tag = f"#{tag}" if not tag.startswith('#') else tag
                                 hashtags.append(formatted_tag)
                         result['hashtags'] = hashtags
@@ -369,17 +380,16 @@ class BitChuteAPI:
                     result = future.result()
                     if result and 'video_id' in result:
                         video_id = result['video_id']
-                        # Update all fields in details_map
                         for key in ['like_count', 'dislike_count', 'view_count', 'hashtags']:
                             if key in result:
                                 details_map[video_id][key] = result[key]
             
-            # BATCH 2: Fetch media URLs (unchanged)
+            # Batch 2: Fetch media URLs
             if self.verbose:
                 logger.info("Batch 2: Fetching media URLs...")
             
             def fetch_media(video_id: str) -> Dict[str, Any]:
-                """Fetch media URL for a single video"""
+                """Fetch media URL for a single video."""
                 try:
                     payload = {"video_id": video_id}
                     data = self._make_request("beta/video/media", payload)
@@ -395,7 +405,7 @@ class BitChuteAPI:
                 
                 return {'video_id': video_id}
             
-            # Execute media in parallel
+            # Execute media fetching in parallel
             with ThreadPoolExecutor(max_workers=min(self.max_workers, len(video_ids))) as executor:
                 future_to_id = {
                     executor.submit(fetch_media, video_id): video_id
@@ -411,10 +421,8 @@ class BitChuteAPI:
                                 details_map[video_id][key] = result[key]
         
         finally:
-            # Restore original rate limiting
             self.rate_limiter.rate_limit = original_rate_limit
         
-        # Log results
         if self.verbose:
             duration = time.time() - start_time
             success_counts = sum(1 for d in details_map.values() if d['like_count'] > 0 or d['view_count'] > 0)
@@ -426,7 +434,11 @@ class BitChuteAPI:
 
     def _apply_details_to_videos(self, videos: List, details_map: Dict[str, Dict[str, Any]]):
         """
-        FIXED: Apply fetched details including hashtags to Video objects
+        Apply fetched details including hashtags to Video objects.
+        
+        Args:
+            videos: List of Video objects to update.
+            details_map: Details from _fetch_details_parallel().
         """
         for video in videos:
             if video.id in details_map:
@@ -446,21 +458,20 @@ class BitChuteAPI:
                 if details['media_type']:
                     video.media_type = details['media_type']
                 
-                # FIXED: Apply hashtags
+                # Apply hashtags
                 if details['hashtags']:
                     video.hashtags = details['hashtags']
 
     def _ensure_consistent_schema(self, df):
         """
-        Ensure DataFrame has consistent schema across all video functions
+        Ensure DataFrame has consistent schema across all video functions.
         
         Args:
-            df: DataFrame to standardize
+            df: DataFrame to standardize.
             
         Returns:
-            DataFrame with consistent columns and types
+            DataFrame with consistent columns and types.
         """
-        # Define expected columns with default values
         expected_columns = {
             'id': '',
             'title': '',
@@ -479,7 +490,6 @@ class BitChuteAPI:
             'dislike_count': 0,
             'media_url': '',
             'media_type': '',
-            # NEW: Download-related columns
             'local_thumbnail_path': '',
             'local_video_path': ''
         }
@@ -511,23 +521,21 @@ class BitChuteAPI:
         force_redownload: Optional[bool] = None
     ) -> List[Video]:
         """
-        Process downloads for a list of videos and update their file paths
+        Process downloads for a list of videos and update their file paths.
         
         Args:
-            videos: List of Video objects
-            download_thumbnails: Whether to download thumbnails
-            download_videos: Whether to download videos
-            force_redownload: Override the instance force_redownload setting
+            videos: List of Video objects.
+            download_thumbnails: Whether to download thumbnails.
+            download_videos: Whether to download videos.
+            force_redownload: Override the instance force_redownload setting.
             
         Returns:
-            Updated list of Video objects with local file paths
+            Updated list of Video objects with local file paths.
         """
-
-        # Allow downloads if explicitly requested OR if downloads are globally enabled
         if not ((download_thumbnails or download_videos) or self.enable_downloads):
              return videos
         
-        # Initialize download manager on-demand if needed but downloads are requested
+        # Initialize download manager on-demand if needed
         if not self.download_manager and (download_thumbnails or download_videos):
             if self.verbose:
                 logger.info("Download manager not initialized but downloads requested. Initializing with defaults.")
@@ -574,7 +582,8 @@ class BitChuteAPI:
                 )
                 
                 # Update video objects with local file paths
-                if video.id in results:
+                for video in videos:
+                    if video.id in results:
                         video_results = results[video.id]
                         
                         # Update thumbnail path
@@ -596,13 +605,13 @@ class BitChuteAPI:
 
     def _fetch_channel_details_parallel(self, channel_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """
-        Fetch detailed channel information and profile links in parallel
+        Fetch detailed channel information and profile links in parallel.
         
         Args:
-            channel_ids: List of channel IDs to enrich
+            channel_ids: List of channel IDs to enrich.
             
         Returns:
-            Dict mapping channel_id to detailed info including social links
+            Dictionary mapping channel_id to detailed info including social links.
         """
         if not channel_ids:
             return {}
@@ -626,12 +635,12 @@ class BitChuteAPI:
         self.rate_limiter.rate_limit = 0.05
         
         try:
-            # BATCH 1: Fetch full channel details
+            # Batch 1: Fetch full channel details
             if self.verbose:
                 logger.info("Batch 1: Fetching full channel details...")
             
             def fetch_channel_details(channel_id: str) -> Dict[str, Any]:
-                """Fetch full channel details for a single channel"""
+                """Fetch full channel details for a single channel."""
                 try:
                     payload = {"channel_id": channel_id}
                     data = self._make_request("beta/channel", payload)
@@ -660,12 +669,12 @@ class BitChuteAPI:
                         if 'full_details' in result:
                             details_map[channel_id]['full_details'] = result['full_details']
             
-            # BATCH 2: Fetch profile links for channels that have profile_id
+            # Batch 2: Fetch profile links for channels that have profile_id
             if self.verbose:
                 logger.info("Batch 2: Fetching profile links...")
             
             def fetch_profile_links(channel_info: Dict[str, Any]) -> Dict[str, Any]:
-                """Fetch profile links for a channel"""
+                """Fetch profile links for a channel."""
                 channel_id = channel_info['channel_id']
                 full_details = channel_info['full_details']
                 
@@ -675,7 +684,7 @@ class BitChuteAPI:
                         payload = {
                             "profile_id": profile_id,
                             "offset": 0,
-                            "limit": 20  # Get up to 20 social links
+                            "limit": 20
                         }
                         data = self._make_request("beta/profile/links", payload)
                         if data and 'links' in data:
@@ -727,20 +736,19 @@ class BitChuteAPI:
 
     def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
         """
-        Apply fetched detailed info to Channel objects
+        Apply fetched detailed info to Channel objects.
         
         Args:
-            channels: List of Channel objects to enrich
-            details_map: Details from _fetch_channel_details_parallel()
+            channels: List of Channel objects to enrich.
+            details_map: Details from _fetch_channel_details_parallel().
         """
         for channel in channels:
             if channel.id in details_map:
                 details = details_map[channel.id]
                 
-                # Apply full channel details (overwrite with more complete data)
+                # Apply full channel details
                 full_details = details.get('full_details', {})
                 if full_details:
-                    # Update all fields with complete data
                     channel.description = full_details.get('description', channel.description)
                     channel.video_count = int(full_details.get('video_count', channel.video_count) or 0)
                     channel.view_count = int(full_details.get('view_count', channel.view_count) or 0)
