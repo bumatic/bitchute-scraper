@@ -47,7 +47,7 @@ from .exceptions import (
     AuthenticationError,
     NetworkError,
     DataProcessingError,
-    ConfigurationError
+    ConfigurationError,
 )
 from .token_manager import TokenManager
 from .validators import InputValidator
@@ -60,7 +60,7 @@ from .utils import (
     BulkProcessor,
     DataExporter,
     ContentFilter,
-    CacheManager
+    CacheManager,
 )
 
 __version__ = "1.0.0"
@@ -75,86 +75,89 @@ API = BitChuteAPI
 # Public API exports
 __all__ = [
     # Core API
-    'BitChuteAPI',
-    'API',
-    
+    "BitChuteAPI",
+    "API",
     # Enums
-    'SensitivityLevel',
-    'SortOrder', 
-    'VideoSelection',
-    
+    "SensitivityLevel",
+    "SortOrder",
+    "VideoSelection",
     # Data Models
-    'Video',
-    'Channel',
-    'Hashtag',
-    'SearchResult',
-    'APIStats',
-    'DownloadResult',
-    
+    "Video",
+    "Channel",
+    "Hashtag",
+    "SearchResult",
+    "APIStats",
+    "DownloadResult",
     # Exceptions
-    'BitChuteAPIError',
-    'TokenExtractionError',
-    'RateLimitError',
-    'ValidationError',
-    'AuthenticationError',
-    'NetworkError',
-    'DataProcessingError',
-    'ConfigurationError',
-    
+    "BitChuteAPIError",
+    "TokenExtractionError",
+    "RateLimitError",
+    "ValidationError",
+    "AuthenticationError",
+    "NetworkError",
+    "DataProcessingError",
+    "ConfigurationError",
     # Core Components
-    'TokenManager',
-    'InputValidator',
-    'MediaDownloadManager',
-    
+    "TokenManager",
+    "InputValidator",
+    "MediaDownloadManager",
     # Utility Classes
-    'DataProcessor',
-    'RateLimiter',
-    'RequestBuilder',
-    'PaginationHelper',
-    'BulkProcessor',
-    'DataExporter',
-    'ContentFilter',
-    'CacheManager'
+    "DataProcessor",
+    "RateLimiter",
+    "RequestBuilder",
+    "PaginationHelper",
+    "BulkProcessor",
+    "DataExporter",
+    "ContentFilter",
+    "CacheManager",
 ]
 
 # Package metadata for programmatic access
 __package_info__ = {
-    'name': 'bitchute-scraper',
-    'version': __version__,
-    'author': __author__,
-    'email': __email__,
-    'description': __description__,
-    'url': __url__,
-    'python_requires': '>=3.7',
-    'license': 'MIT',
-    'keywords': ['bitchute', 'api', 'scraper', 'video', 'data-collection', 'download', 'media'],
-    'classifiers': [
-        'Development Status :: 5 - Production/Stable',
-        'Intended Audience :: Developers',
-        'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: MIT License',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
-        'Programming Language :: Python :: 3.12',
-        'Topic :: Internet :: WWW/HTTP :: Dynamic Content',
-        'Topic :: Scientific/Engineering :: Information Analysis',
-        'Topic :: Software Development :: Libraries :: Python Modules',
-        'Topic :: Multimedia :: Video',
-        'Topic :: Internet :: File Transfer Protocol (FTP)',
-    ]
+    "name": "bitchute-scraper",
+    "version": __version__,
+    "author": __author__,
+    "email": __email__,
+    "description": __description__,
+    "url": __url__,
+    "python_requires": ">=3.7",
+    "license": "MIT",
+    "keywords": [
+        "bitchute",
+        "api",
+        "scraper",
+        "video",
+        "data-collection",
+        "download",
+        "media",
+    ],
+    "classifiers": [
+        "Development Status :: 5 - Production/Stable",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+        "Topic :: Scientific/Engineering :: Information Analysis",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: Multimedia :: Video",
+        "Topic :: Internet :: File Transfer Protocol (FTP)",
+    ],
 }
 
 
 def get_version():
     """Get the current package version.
-    
+
     Returns:
         str: The package version string.
-        
+
     Example:
         >>> import bitchute
         >>> print(bitchute.get_version())
@@ -165,11 +168,11 @@ def get_version():
 
 def get_package_info():
     """Get complete package information dictionary.
-    
+
     Returns:
         dict: Dictionary containing package metadata including name, version,
             author, description, requirements, and classifiers.
-            
+
     Example:
         >>> import bitchute
         >>> info = bitchute.get_package_info()
