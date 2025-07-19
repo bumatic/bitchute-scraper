@@ -732,7 +732,7 @@ class BitChuteAPI:
         
         return details_map
 
-def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
+    def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
         """Apply fetched detailed information to Channel objects.
         
         Args:
@@ -1670,8 +1670,7 @@ def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[s
         if not clean_hashtag:
             raise ValidationError("Hashtag cannot be empty after cleaning", "hashtag")
         
-        if not re.match(r'^[a-zA-Z0-9_-]+
-        , clean_hashtag):
+        if not re.match(r'^[a-zA-Z0-9_-]+$', clean_hashtag):
             raise ValidationError(f"Invalid hashtag format: '{hashtag}'", "hashtag")
         
         if self.verbose:
@@ -2392,7 +2391,7 @@ def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[s
         
         return video
 
-def get_channel_info(self, channel_id: str) -> pd.DataFrame:
+    def get_channel_info(self, channel_id: str) -> pd.DataFrame:
         """Get detailed channel information as single-row DataFrame for consistency.
         
         Args:
