@@ -1,5 +1,23 @@
 """
-BitChute Scraper CLI
+BitChute Scraper Command Line Interface
+
+Provides a comprehensive command-line interface for BitChute data collection
+with support for all major platform features including trending videos,
+search functionality, data export, and analysis.
+
+This module implements a full-featured CLI with colored output, progress tracking,
+and multiple export formats for easy integration with data workflows.
+
+Example:
+    Basic usage:
+        $ bitchute trending --timeframe day --limit 50 --format csv
+        $ bitchute search "climate change" --limit 100 --sort views
+        $ bitchute popular --analyze --format xlsx
+
+    Advanced usage:
+        $ bitchute hashtags --limit 30
+        $ bitchute video CLrgZP4RWyly --counts --media
+        $ bitchute channels "news" --limit 20 --sensitivity normal
 """
 
 import argparse
@@ -24,9 +42,16 @@ except ImportError:
 
 
 class CLIFormatter:
-    """Format CLI output with colors and emojis"""
+    """Formats CLI output with colors and status indicators.
     
-    # ANSI color codes
+    Provides consistent formatting for CLI messages including success,
+    error, warning, and informational messages with ANSI color codes.
+    
+    Attributes:
+        COLORS: Dictionary mapping color names to ANSI escape codes.
+    """
+    
+    # ANSI color codes for terminal output
     COLORS = {
         'red': '\033[91m',
         'green': '\033[92m',
@@ -41,36 +66,102 @@ class CLIFormatter:
     
     @classmethod
     def success(cls, message: str) -> str:
-        """Format success message"""
+        """Format success message with green color and checkmark.
+        
+        Args:
+            message: The success message to format.
+            
+        Returns:
+            str: Formatted success message with color codes.
+            
+        Example:
+            >>> print(CLIFormatter.success("Operation completed"))
+        """
         return f"{cls.COLORS['green']}✅ {message}{cls.COLORS['end']}"
     
     @classmethod
     def error(cls, message: str) -> str:
-        """Format error message"""
+        """Format error message with red color and error icon.
+        
+        Args:
+            message: The error message to format.
+            
+        Returns:
+            str: Formatted error message with color codes.
+            
+        Example:
+            >>> print(CLIFormatter.error("Failed to connect"))
+        """
         return f"{cls.COLORS['red']}❌ {message}{cls.COLORS['end']}"
     
     @classmethod
     def warning(cls, message: str) -> str:
-        """Format warning message"""
+        """Format warning message with yellow color and warning icon.
+        
+        Args:
+            message: The warning message to format.
+            
+        Returns:
+            str: Formatted warning message with color codes.
+            
+        Example:
+            >>> print(CLIFormatter.warning("Rate limit approaching"))
+        """
         return f"{cls.COLORS['yellow']}⚠️  {message}{cls.COLORS['end']}"
     
     @classmethod
     def info(cls, message: str) -> str:
-        """Format info message"""
+        """Format informational message with blue color and info icon.
+        
+        Args:
+            message: The info message to format.
+            
+        Returns:
+            str: Formatted info message with color codes.
+            
+        Example:
+            >>> print(CLIFormatter.info("Processing 100 videos"))
+        """
         return f"{cls.COLORS['blue']}ℹ️  {message}{cls.COLORS['end']}"
     
     @classmethod
     def bold(cls, message: str) -> str:
-        """Format bold message"""
+        """Format message with bold text styling.
+        
+        Args:
+            message: The message to format in bold.
+            
+        Returns:
+            str: Bold formatted message.
+            
+        Example:
+            >>> print(CLIFormatter.bold("Important Notice"))
+        """
         return f"{cls.COLORS['bold']}{message}{cls.COLORS['end']}"
 
 
 class CLIResultPrinter:
-    """Print CLI results in a formatted way"""
+    """Prints CLI results in formatted tables and summaries.
+    
+    Provides consistent result presentation for different data types
+    including videos, channels, and hashtags with statistics and
+    top results display.
+    """
     
     @staticmethod
     def print_video_results(df, title: str):
-        """Print video results summary"""
+        """Print formatted video results with statistics.
+        
+        Displays video collection results including total count, view statistics,
+        duration information, and top results in a formatted layout.
+        
+        Args:
+            df: DataFrame containing video results.
+            title: Display title for the results section.
+            
+        Example:
+            >>> CLIResultPrinter.print_video_results(trending_df, "Trending Videos")
+        """
         if df.empty:
             print(CLIFormatter.warning(f"No {title.lower()} found."))
             return
@@ -85,7 +176,7 @@ class CLIResultPrinter:
             print(f"   Average views: {avg_views:,.0f}")
         
         if 'duration' in df.columns:
-            # Calculate total duration
+            # Calculate total duration from duration strings
             total_seconds = 0
             for duration in df['duration'].dropna():
                 try:
@@ -117,7 +208,18 @@ class CLIResultPrinter:
     
     @staticmethod
     def print_channel_results(df, title: str):
-        """Print channel results summary"""
+        """Print formatted channel results with statistics.
+        
+        Displays channel collection results including total count, video statistics,
+        subscriber information, and top channels in a formatted layout.
+        
+        Args:
+            df: DataFrame containing channel results.
+            title: Display title for the results section.
+            
+        Example:
+            >>> CLIResultPrinter.print_channel_results(channels_df, "Search Results")
+        """
         if df.empty:
             print(CLIFormatter.warning(f"No {title.lower()} found."))
             return
@@ -144,7 +246,18 @@ class CLIResultPrinter:
     
     @staticmethod
     def print_hashtag_results(df, title: str):
-        """Print hashtag results summary"""
+        """Print formatted hashtag results with ranking.
+        
+        Displays hashtag collection results including total count and
+        top trending hashtags in ranked order.
+        
+        Args:
+            df: DataFrame containing hashtag results.
+            title: Display title for the results section.
+            
+        Example:
+            >>> CLIResultPrinter.print_hashtag_results(hashtags_df, "Trending Hashtags")
+        """
         if df.empty:
             print(CLIFormatter.warning(f"No {title.lower()} found."))
             return
@@ -159,7 +272,18 @@ class CLIResultPrinter:
     
     @staticmethod
     def print_analysis_results(analysis: Dict[str, Any]):
-        """Print data analysis results"""
+        """Print data analysis results with statistics.
+        
+        Displays comprehensive analysis results including view statistics,
+        duration analysis, top channels, and hashtag information.
+        
+        Args:
+            analysis: Dictionary containing analysis results with various metrics.
+            
+        Example:
+            >>> analysis = {'total_videos': 100, 'views': {'total': 50000}}
+            >>> CLIResultPrinter.print_analysis_results(analysis)
+        """
         print(f"\n📈 {CLIFormatter.bold('Data Analysis')}:")
         
         if 'total_videos' in analysis:
@@ -192,11 +316,28 @@ class CLIResultPrinter:
 
 
 class CLIDataManager:
-    """Manage CLI data operations"""
+    """Manages CLI data operations including saving and analysis.
+    
+    Handles data export operations and analysis with user feedback
+    for command-line interface operations.
+    """
     
     @staticmethod
     def save_data(df, filename: str, formats: List[str], verbose: bool = False):
-        """Save data to file(s) with CLI feedback"""
+        """Save DataFrame to specified formats with CLI feedback.
+        
+        Exports data to multiple file formats and provides user feedback
+        on file locations and sizes.
+        
+        Args:
+            df: DataFrame containing data to export.
+            filename: Base filename without extension.
+            formats: List of format strings (csv, json, xlsx, parquet).
+            verbose: Whether to show detailed output.
+            
+        Example:
+            >>> CLIDataManager.save_data(videos_df, "trending", ["csv", "json"])
+        """
         if df.empty:
             print(CLIFormatter.warning("No data to save."))
             return
@@ -218,7 +359,18 @@ class CLIDataManager:
     
     @staticmethod
     def analyze_data(df, show_analysis: bool = False):
-        """Analyze data and optionally print results"""
+        """Analyze DataFrame and optionally print results.
+        
+        Performs comprehensive data analysis and displays results
+        if analysis is requested by the user.
+        
+        Args:
+            df: DataFrame containing data to analyze.
+            show_analysis: Whether to display analysis results.
+            
+        Example:
+            >>> CLIDataManager.analyze_data(videos_df, show_analysis=True)
+        """
         if df.empty or not show_analysis:
             return
         
@@ -236,7 +388,18 @@ class CLIDataManager:
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
-    """Create and configure argument parser"""
+    """Create and configure the command-line argument parser.
+    
+    Sets up the complete argument parser with all subcommands, options,
+    and help text for the BitChute CLI interface.
+    
+    Returns:
+        argparse.ArgumentParser: Configured argument parser with all subcommands.
+        
+    Example:
+        >>> parser = create_argument_parser()
+        >>> args = parser.parse_args(['trending', '--limit', '50'])
+    """
     parser = argparse.ArgumentParser(
         description='BitChute API Scraper - Extract videos, channels, and hashtags',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -265,7 +428,7 @@ For more information, visit: https://github.com/bumatic/bitchute-scraper
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
-    # Trending videos
+    # Trending videos command
     trending = subparsers.add_parser('trending', help='Get trending videos')
     trending.add_argument('--timeframe', '-t', choices=['day', 'week', 'month'], 
                          default='day', help='Trending timeframe (default: day)')
@@ -274,24 +437,82 @@ For more information, visit: https://github.com/bumatic/bitchute-scraper
     trending.add_argument('--offset', type=int, default=0,
                          help='Pagination offset (default: 0)')
     
-    # Popular videos
+    # Popular videos command
     popular = subparsers.add_parser('popular', help='Get popular videos')
     popular.add_argument('--limit', '-l', type=int, default=30,
                         help='Number of videos (default: 30)')
     popular.add_argument('--offset', type=int, default=0,
                         help='Pagination offset (default: 0)')
     
-    # Recent videos
+    # Recent videos command
     recent = subparsers.add_parser('recent', help='Get recent videos')
     recent.add_argument('--limit', '-l', type=int, default=30,
                        help='Number of videos (default: 30)')
     recent.add_argument('--pages', '-p', type=int, default=1,
                    help='Number of pages to fetch (default: 1)')
 
+    # Search videos command
+    search = subparsers.add_parser('search', help='Search videos')
+    search.add_argument('query', help='Search query string')
+    search.add_argument('--limit', '-l', type=int, default=50,
+                       help='Number of results (default: 50)')
+    search.add_argument('--sensitivity', choices=['normal', 'nsfw', 'nsfl'],
+                       default='normal', help='Content sensitivity (default: normal)')
+    search.add_argument('--sort', choices=['new', 'old', 'views'],
+                       default='new', help='Sort order (default: new)')
+    
+    # Search channels command
+    channels = subparsers.add_parser('channels', help='Search channels')
+    channels.add_argument('query', help='Search query string')
+    channels.add_argument('--limit', '-l', type=int, default=50,
+                         help='Number of results (default: 50)')
+    channels.add_argument('--sensitivity', choices=['normal', 'nsfw', 'nsfl'],
+                         default='normal', help='Content sensitivity (default: normal)')
+    
+    # Trending hashtags command
+    hashtags = subparsers.add_parser('hashtags', help='Get trending hashtags')
+    hashtags.add_argument('--limit', '-l', type=int, default=50,
+                         help='Number of hashtags (default: 50)')
+    
+    # Individual video command
+    video = subparsers.add_parser('video', help='Get video details')
+    video.add_argument('video_id', help='Video ID to retrieve')
+    video.add_argument('--counts', action='store_true',
+                      help='Include like/dislike counts')
+    video.add_argument('--media', action='store_true',
+                      help='Include media URL')
+    
+    # Individual channel command
+    channel = subparsers.add_parser('channel', help='Get channel details')
+    channel.add_argument('channel_id', help='Channel ID to retrieve')
+    
+    # Channel videos command
+    channel_videos = subparsers.add_parser('channel-videos', help='Get videos from channel')
+    channel_videos.add_argument('channel_id', help='Channel ID')
+    channel_videos.add_argument('--limit', '-l', type=int, default=50,
+                               help='Number of videos (default: 50)')
+    channel_videos.add_argument('--order', choices=['latest', 'popular', 'oldest'],
+                               default='latest', help='Video order (default: latest)')
+    
+    return parser
+
+
 def main():
-    """Main entry point for the CLI application"""
+    """Main entry point for the CLI application.
+    
+    Handles command-line argument parsing, API client initialization,
+    command execution, and result presentation with error handling.
+    
+    Returns:
+        int: Exit code (0 for success, 1 for error).
+        
+    Example:
+        Command line usage:
+            $ bitchute trending --limit 50
+            $ python -m bitchute.cli search "bitcoin"
+    """
     try:
-        # Parse arguments
+        # Parse command-line arguments
         parser = create_argument_parser()
         args = parser.parse_args()
         
@@ -300,19 +521,19 @@ def main():
             parser.print_help()
             return 0
         
-        # Initialize API client
+        # Initialize API client with user settings
         api = BitChuteAPI(
             verbose=args.verbose,
             timeout=args.timeout
         )
         
-        # Initialize utilities
+        # Initialize data management utilities
         data_manager = CLIDataManager()
         
-        # Parse output formats
+        # Parse output formats from comma-separated string
         formats = [fmt.strip() for fmt in args.format.split(',')]
         
-        # Execute command
+        # Execute the requested command
         try:
             if args.command == 'trending':
                 df = api.get_trending_videos(
@@ -338,7 +559,7 @@ def main():
                     data_manager.analyze_data(df, args.analyze)
             
             elif args.command == 'recent':
-                # Handle pages parameter for recent videos
+                # Handle multiple pages for recent videos
                 total_limit = args.limit * args.pages if hasattr(args, 'pages') else args.limit
                 df = api.get_recent_videos(
                     limit=total_limit,
@@ -362,6 +583,7 @@ def main():
                     CLIResultPrinter.print_video_results(df, f"Search Results for '{args.query}'")
                     
                     if not df.empty:
+                        # Create safe filename from query
                         safe_query = "".join(c for c in args.query if c.isalnum() or c in (' ', '_', '-')).rstrip()
                         data_manager.save_data(df, f'search_{safe_query}', formats, args.verbose)
                         data_manager.analyze_data(df, args.analyze)
@@ -380,6 +602,7 @@ def main():
                     CLIResultPrinter.print_channel_results(df, f"Channel Search Results for '{args.query}'")
                     
                     if not df.empty:
+                        # Create safe filename from query
                         safe_query = "".join(c for c in args.query if c.isalnum() or c in (' ', '_', '-')).rstrip()
                         data_manager.save_data(df, f'channels_{safe_query}', formats, args.verbose)
                 else:
@@ -422,6 +645,44 @@ def main():
                         return 1
                 else:
                     print(CLIFormatter.error("Video ID is required"))
+                    return 1
+            
+            elif args.command == 'channel':
+                if hasattr(args, 'channel_id'):
+                    df = api.get_channel_info(channel_id=args.channel_id)
+                    
+                    if not df.empty:
+                        print(f"\n📺 {CLIFormatter.bold('Channel Details')}:")
+                        channel = df.iloc[0]
+                        print(f"   Name: {channel['name']}")
+                        print(f"   Videos: {channel['video_count']:,}")
+                        print(f"   Subscribers: {channel['subscriber_count']}")
+                        print(f"   Total Views: {channel['view_count']:,}")
+                        print(f"   Created: {channel['created_date']}")
+                        
+                        data_manager.save_data(df, f'channel_{args.channel_id}', formats, args.verbose)
+                    else:
+                        print(CLIFormatter.error(f"Channel not found: {args.channel_id}"))
+                        return 1
+                else:
+                    print(CLIFormatter.error("Channel ID is required"))
+                    return 1
+            
+            elif args.command == 'channel-videos':
+                if hasattr(args, 'channel_id'):
+                    df = api.get_channel_videos(
+                        channel_id=args.channel_id,
+                        limit=args.limit,
+                        order_by=getattr(args, 'order', 'latest'),
+                        include_details=True
+                    )
+                    CLIResultPrinter.print_video_results(df, f"Videos from Channel")
+                    
+                    if not df.empty:
+                        data_manager.save_data(df, f'channel_videos_{args.channel_id}', formats, args.verbose)
+                        data_manager.analyze_data(df, args.analyze)
+                else:
+                    print(CLIFormatter.error("Channel ID is required"))
                     return 1
             
             else:
