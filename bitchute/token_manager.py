@@ -1,6 +1,26 @@
 """
-BitChute Scraper Token Manager - Updated Version
-Handles dynamic token generation with multiple fallback methods
+BitChute Scraper Token Manager
+
+Handles dynamic authentication token generation and management with multiple
+fallback methods for reliable API access. Provides robust token extraction
+capabilities including web scraping, API-based generation, and intelligent
+caching strategies.
+
+This module implements a comprehensive token management system that automatically
+handles token expiration, provides multiple extraction methods for reliability,
+and includes intelligent fallback strategies to ensure consistent API access
+even when primary token sources are unavailable.
+
+Classes:
+    TokenManager: Main token management class with multiple extraction methods
+
+The token manager supports three primary extraction methods:
+1. Timer API calls for direct token retrieval
+2. Token generation with validation testing
+3. Web scraping from BitChute pages using Selenium
+
+Token caching is implemented to reduce extraction frequency and improve
+performance, with automatic expiration handling and thread-safe operations.
 """
 
 import time
@@ -29,17 +49,64 @@ logger = logging.getLogger(__name__)
 
 
 class TokenManager:
-    """
-    Enhanced token manager with multiple extraction methods and fallbacks
+    """Enhanced token manager with multiple extraction methods and fallbacks.
+    
+    Provides comprehensive token management functionality including automatic
+    token extraction, intelligent caching, and multiple fallback methods to
+    ensure reliable API authentication. The manager handles token expiration,
+    validation, and provides thread-safe operations for concurrent usage.
+    
+    The token manager implements three primary extraction strategies:
+    1. Timer API extraction - Direct API calls to obtain tokens
+    2. Token generation with validation - Algorithmic generation with testing
+    3. Web scraping extraction - Browser-based token extraction from pages
+    
+    Attributes:
+        cache_tokens: Whether to cache tokens to disk for persistence
+        verbose: Whether to enable detailed logging output
+        token: Current active authentication token
+        expires_at: Unix timestamp when current token expires
+        cache_file: Path to token cache file
+        webdriver: Selenium WebDriver instance for web scraping
+        token_patterns: Regular expression patterns for token extraction
+        
+    Example:
+        >>> # Basic usage
+        >>> manager = TokenManager(cache_tokens=True, verbose=True)
+        >>> token = manager.get_token()
+        >>> if token:
+        ...     print(f"Got token: {token[:10]}...")
+        >>> 
+        >>> # Check token status
+        >>> if manager.has_valid_token():
+        ...     print("Token is valid and not expired")
+        >>> 
+        >>> # Invalidate token manually
+        >>> manager.invalidate_token()
+        >>> 
+        >>> # Get token information
+        >>> info = manager.get_token_info()
+        >>> print(f"Token expires in {info['time_until_expiry']:.0f} seconds")
     """
     
     def __init__(self, cache_tokens: bool = True, verbose: bool = False):
-        """
-        Initialize token manager
+        """Initialize token manager with configuration options.
         
         Args:
-            cache_tokens: Whether to cache tokens to disk
-            verbose: Enable verbose logging
+            cache_tokens: Whether to cache tokens to disk for persistence
+                across sessions
+            verbose: Whether to enable verbose logging for debugging and
+                monitoring token extraction operations
+                
+        Example:
+            >>> # Basic initialization
+            >>> manager = TokenManager()
+            >>> 
+            >>> # Advanced configuration
+            >>> manager = TokenManager(
+            ...     cache_tokens=True,  # Enable persistent caching
+            ...     verbose=True        # Enable detailed logging
+            ... )
         """
         
         self.cache_tokens = cache_tokens
@@ -50,6 +117,7 @@ class TokenManager:
         self.webdriver = None
         self._lock = threading.Lock()
         
+        # Regular expression patterns for token extraction from various sources
         self.token_patterns = [
             r'"x-service-info":\s*"([a-zA-Z0-9_-]{28})"',
             r"'x-service-info':\s*'([a-zA-Z0-9_-]{28})'",
@@ -62,9 +130,16 @@ class TokenManager:
         if cache_tokens:
             self._load_cached_token()
 
-
     def _load_cached_token(self):
-        """Load token from cache if valid"""
+        """Load authentication token from disk cache if valid.
+        
+        Attempts to load a previously cached token from the local filesystem.
+        Validates token expiration and only loads tokens that are still valid
+        with a 30-minute buffer for safety.
+        
+        The cache file contains JSON data with token, expiration time, and
+        creation timestamp for comprehensive token lifecycle management.
+        """
         try:
             if self.cache_file.exists():
                 with open(self.cache_file, 'r') as f:
@@ -83,7 +158,12 @@ class TokenManager:
                 logger.warning(f"Failed to load cached token: {e}")
     
     def _save_token_cache(self):
-        """Save token to cache"""
+        """Save current token to disk cache for persistence.
+        
+        Writes the current token, expiration time, and creation timestamp
+        to a JSON cache file for reuse across sessions. Creates the cache
+        directory if it doesn't exist.
+        """
         if not self.cache_tokens or not self.token:
             return
         
@@ -108,7 +188,22 @@ class TokenManager:
                 logger.warning(f"Failed to save token cache: {e}")
     
     def _extract_token_via_timer_api(self) -> Optional[str]:
-        """Extract token by calling the timer API directly"""
+        """Extract authentication token by calling the BitChute timer API.
+        
+        Attempts to obtain a valid authentication token by making a direct
+        API call to BitChute's timer endpoint. This is often the most reliable
+        method when available.
+        
+        Returns:
+            Optional[str]: Valid authentication token if extraction successful,
+                None if the API call fails or returns invalid data
+                
+        Example:
+            >>> manager = TokenManager(verbose=True)
+            >>> token = manager._extract_token_via_timer_api()
+            >>> if token:
+            ...     print(f"Timer API returned: {token[:10]}...")
+        """
         if self.verbose:
             logger.info("Attempting token extraction via timer API")
         
@@ -147,12 +242,45 @@ class TokenManager:
         return None
     
     def _generate_token(self) -> str:
-        """Generate a token using BitChute's algorithm (28 chars)"""
+        """Generate authentication token using BitChute's algorithm.
+        
+        Creates a 28-character token using the same character set and format
+        that BitChute uses for authentication tokens. The generated token
+        follows the standard format of alphanumeric characters, underscores,
+        and hyphens.
+        
+        Returns:
+            str: Generated 28-character authentication token
+            
+        Example:
+            >>> manager = TokenManager()
+            >>> token = manager._generate_token()
+            >>> print(len(token))  # 28
+            >>> print(token[:10])  # First 10 characters
+        """
         characters = string.ascii_letters + string.digits + '_-'
         return ''.join(random.choice(characters) for _ in range(28))
     
     def _validate_generated_token(self, token: str) -> bool:
-        """Validate a generated token by testing it"""
+        """Validate a generated token by testing it against the API.
+        
+        Tests whether a generated token is accepted by the BitChute API
+        by making a test request to the videos endpoint. This ensures
+        that generated tokens are actually functional.
+        
+        Args:
+            token: Generated token to validate
+            
+        Returns:
+            bool: True if token is accepted by the API, False otherwise
+            
+        Example:
+            >>> manager = TokenManager()
+            >>> test_token = manager._generate_token()
+            >>> is_valid = manager._validate_generated_token(test_token)
+            >>> if is_valid:
+            ...     print("Generated token is functional")
+        """
         try:
             headers = {
                 'accept': 'application/json, text/plain, */*',
@@ -181,7 +309,15 @@ class TokenManager:
             return False
     
     def _create_webdriver(self):
-        """Create optimized webdriver for token extraction"""
+        """Create optimized WebDriver instance for token extraction.
+        
+        Initializes a Chrome WebDriver with optimized settings for fast,
+        reliable token extraction from BitChute pages. Includes anti-detection
+        measures and performance optimizations.
+        
+        Raises:
+            TokenExtractionError: If WebDriver initialization fails
+        """
         if self.webdriver:
             return
         
@@ -201,7 +337,7 @@ class TokenManager:
         options.add_argument('--disable-backgrounding-occluded-windows')
         options.add_argument('--disable-renderer-backgrounding')
         
-        # Anti-detection
+        # Anti-detection measures
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
@@ -230,7 +366,11 @@ class TokenManager:
             raise TokenExtractionError(f"Webdriver initialization failed: {e}")
     
     def _close_webdriver(self):
-        """Safely close webdriver"""
+        """Safely close and cleanup WebDriver instance.
+        
+        Properly closes the WebDriver instance and handles any cleanup
+        errors gracefully to prevent resource leaks.
+        """
         if self.webdriver:
             try:
                 self.webdriver.quit()
@@ -242,7 +382,27 @@ class TokenManager:
     
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
     def _extract_token_from_page(self, url: str = 'https://www.bitchute.com/') -> Optional[str]:
-        """Extract token from BitChute page with dynamic token waiting"""
+        """Extract authentication token from BitChute page using web scraping.
+        
+        Uses Selenium WebDriver to load a BitChute page and extract authentication
+        tokens from various sources including JavaScript variables, localStorage,
+        and page source. Implements retry logic for reliability.
+        
+        Args:
+            url: BitChute URL to load for token extraction
+            
+        Returns:
+            Optional[str]: Extracted token if successful, None if extraction fails
+            
+        Raises:
+            TokenExtractionError: If page loading fails or WebDriver errors occur
+            
+        Example:
+            >>> manager = TokenManager(verbose=True)
+            >>> token = manager._extract_token_from_page()
+            >>> if token:
+            ...     print(f"Extracted token: {token[:10]}...")
+        """
         try:
             if self.verbose:
                 logger.info(f"Extracting API token from {url}")
@@ -261,7 +421,7 @@ class TokenManager:
             if self.verbose:
                 logger.info("Waiting for dynamic token generation...")
             
-            # Use a simpler approach for testing
+            # Check multiple token sources using JavaScript
             token = self.webdriver.execute_script("""
                 // Check localStorage first
                 var stored = localStorage.getItem('xServiceInfo');
@@ -323,7 +483,18 @@ class TokenManager:
             self._close_webdriver()
     
     def _extract_token_from_source(self, page_source: str) -> Optional[str]:
-        """Extract token using regex patterns"""
+        """Extract token from page source using regular expression patterns.
+        
+        Searches the page source HTML/JavaScript for authentication tokens
+        using predefined regular expression patterns that match various
+        token storage formats used by BitChute.
+        
+        Args:
+            page_source: HTML page source content to search
+            
+        Returns:
+            Optional[str]: Extracted token if found, None otherwise
+        """
         for pattern in self.token_patterns:
             try:
                 match = re.search(pattern, page_source, re.IGNORECASE | re.DOTALL)
@@ -339,7 +510,15 @@ class TokenManager:
         return None
     
     def _extract_token_from_scripts(self) -> Optional[str]:
-        """Extract token from script tags"""
+        """Extract token from individual script tags on the page.
+        
+        Iterates through all script elements on the current page and
+        searches their content for authentication tokens using the
+        configured regular expression patterns.
+        
+        Returns:
+            Optional[str]: Extracted token if found in scripts, None otherwise
+        """
         try:
             script_elements = self.webdriver.find_elements(By.TAG_NAME, "script")
             
@@ -360,7 +539,23 @@ class TokenManager:
         return None
     
     def _is_valid_token(self, token: str) -> bool:
-        """Validate token format (28 alphanumeric chars, underscores, hyphens)"""
+        """Validate token format according to BitChute specifications.
+        
+        Checks whether a token string matches the expected format for
+        BitChute authentication tokens: exactly 28 characters containing
+        only alphanumeric characters, underscores, and hyphens.
+        
+        Args:
+            token: Token string to validate
+            
+        Returns:
+            bool: True if token format is valid, False otherwise
+            
+        Example:
+            >>> manager = TokenManager()
+            >>> valid = manager._is_valid_token("abcd1234_test-token_1234567890")
+            >>> print(valid)  # True if exactly 28 chars with valid format
+        """
         if not token or not isinstance(token, str):
             return False
         
@@ -375,11 +570,30 @@ class TokenManager:
         return True
     
     def get_token(self) -> Optional[str]:
-        """
-        Get valid authentication token with multiple fallback methods
+        """Get valid authentication token using multiple fallback methods.
+        
+        Retrieves a valid authentication token using a comprehensive fallback
+        strategy. First checks for cached valid tokens, then attempts multiple
+        extraction methods in order of reliability:
+        1. Timer API extraction
+        2. Token generation with validation
+        3. Web scraping extraction
+        
+        The method is thread-safe and implements intelligent caching to
+        minimize extraction frequency and improve performance.
         
         Returns:
-            Valid token or None if all methods fail
+            Optional[str]: Valid authentication token if any method succeeds,
+                None if all extraction methods fail
+                
+        Example:
+            >>> manager = TokenManager(verbose=True)
+            >>> token = manager.get_token()
+            >>> if token:
+            ...     print(f"Successfully obtained token: {token[:10]}...")
+            ...     # Use token for API requests
+            ... else:
+            ...     print("Failed to obtain authentication token")
         """
         with self._lock:
             # Check if current token is still valid
@@ -443,7 +657,19 @@ class TokenManager:
             return None
     
     def invalidate_token(self):
-        """Invalidate current token"""
+        """Invalidate current token and remove from cache.
+        
+        Marks the current token as invalid and removes any cached token
+        from disk storage. This forces the next token request to perform
+        fresh extraction. Thread-safe operation.
+        
+        Example:
+            >>> manager = TokenManager()
+            >>> token = manager.get_token()
+            >>> # ... token becomes invalid ...
+            >>> manager.invalidate_token()
+            >>> new_token = manager.get_token()  # Will extract fresh token
+        """
         with self._lock:
             self.token = None
             self.expires_at = 0
@@ -459,11 +685,48 @@ class TokenManager:
                         logger.warning(f"Failed to remove cached token: {e}")
     
     def has_valid_token(self) -> bool:
-        """Check if we have a valid token"""
+        """Check if current token is valid and not expired.
+        
+        Verifies that a token exists and is not within 30 minutes of
+        expiration (safety buffer).
+        
+        Returns:
+            bool: True if token is valid and not near expiration
+            
+        Example:
+            >>> manager = TokenManager()
+            >>> manager.get_token()
+            >>> if manager.has_valid_token():
+            ...     print("Token is ready for use")
+            ... else:
+            ...     print("Need to refresh token")
+        """
         return self.token is not None and time.time() < self.expires_at - 1800
     
     def get_token_info(self) -> dict:
-        """Get token information for debugging"""
+        """Get comprehensive token information for debugging and monitoring.
+        
+        Returns detailed information about the current token state including
+        validity, expiration time, cache status, and time until expiration.
+        Useful for debugging and monitoring token lifecycle.
+        
+        Returns:
+            dict: Dictionary containing:
+                - has_token: Whether a token is currently stored
+                - is_valid: Whether the token is valid and not expired
+                - expires_at: Unix timestamp when token expires
+                - time_until_expiry: Seconds until token expires
+                - cache_enabled: Whether token caching is enabled
+                - cache_file_exists: Whether cache file exists on disk
+                
+        Example:
+            >>> manager = TokenManager()
+            >>> manager.get_token()
+            >>> info = manager.get_token_info()
+            >>> print(f"Token valid: {info['is_valid']}")
+            >>> print(f"Expires in: {info['time_until_expiry']:.0f} seconds")
+            >>> print(f"Cache enabled: {info['cache_enabled']}")
+        """
         return {
             'has_token': self.token is not None,
             'is_valid': self.has_valid_token(),
@@ -474,15 +737,45 @@ class TokenManager:
         }
     
     def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources including WebDriver and temporary files.
+        
+        Properly closes WebDriver instances and cleans up any temporary
+        resources used during token extraction. Should be called when
+        the token manager is no longer needed.
+        
+        Example:
+            >>> manager = TokenManager()
+            >>> try:
+            ...     token = manager.get_token()
+            ...     # Use token for operations
+            ... finally:
+            ...     manager.cleanup()
+        """
         self._close_webdriver()
     
     def __enter__(self):
+        """Context manager entry point.
+        
+        Returns:
+            TokenManager: Self for use in with statements
+        """
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit point.
+        
+        Automatically cleans up resources when exiting the context manager.
+        
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred  
+            exc_tb: Exception traceback if an exception occurred
+        """
         self.cleanup()
     
     def __del__(self):
-        """Cleanup on destruction"""
+        """Cleanup on object destruction.
+        
+        Ensures resources are cleaned up when the object is garbage collected.
+        """
         self.cleanup()
