@@ -148,50 +148,6 @@ setup(
     
     # Requirements
     python_requires=">=3.7",
-    install_requires=CORE_REQUIREMENTS + SELENIUM_REQUIREMENTS + DOWNLOAD_REQUIREMENTS + EXPORT_REQUIREMENTS,
-    
-    # Optional dependencies that can be installed with extras
-    extras_require={
-        # Full installation with all features
-        "full": ALL_REQUIREMENTS,
-        
-        # Optional enhancements
-        "optional": OPTIONAL_REQUIREMENTS,
-        
-        # Progress bars and enhanced UX
-        "progress": ["tqdm>=4.64.0"],
-        
-        # Fast data formats
-        "fast": ["pyarrow>=10.0.0"],
-        
-        # System monitoring
-        "monitoring": ["psutil>=5.8.0"],
-        
-        # Configuration management
-        "config": ["pyyaml>=6.0"],
-        
-        # Development tools
-        "dev": DEV_REQUIREMENTS,
-        
-        # Documentation tools
-        "docs": DOCS_REQUIREMENTS,
-        
-        # Testing only
-        "test": [
-            "pytest>=7.0.0",
-            "pytest-mock>=3.10.0",
-            "pytest-cov>=4.0.0",
-        ],
-        
-        # Code quality tools
-        "lint": [
-            "black>=22.0.0",
-            "flake8>=5.0.0",
-            "mypy>=1.0.0",
-            "types-requests>=2.28.0",
-            "types-python-dateutil>=2.8.0",
-        ],
-    },
     
     # Entry points for command-line interface
     entry_points={
@@ -210,9 +166,6 @@ setup(
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",
         "Intended Audience :: Information Technology",
-        
-        # License
-        "License :: OSI Approved :: MIT License",
         
         # Programming Language
         "Programming Language :: Python :: 3",
@@ -257,9 +210,6 @@ setup(
     
     # Minimum Python version and compatibility
     zip_safe=False,  # Package contains non-Python files
-    
-    # License
-    license="MIT",
     
     # Platform compatibility
     platforms=["any"],

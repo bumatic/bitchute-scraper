@@ -11,7 +11,7 @@ name = "bitchute-scraper"
 dynamic = ["version"]
 description = "A modern, API-based package to scrape BitChute platform data."
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "MIT"
 authors = [
     {name = "Marcus Burkhardt", email = "marcus.burkhardt@gmail.com"}
 ]
@@ -23,7 +23,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
