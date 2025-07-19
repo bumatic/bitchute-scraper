@@ -1,0 +1,112 @@
+# MANIFEST.in
+# Specifies which files to include in the source distribution
+
+# ============================================================================
+# DOCUMENTATION FILES
+# ============================================================================
+
+# Include README and documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include HISTORY.md
+
+# ============================================================================
+# CONFIGURATION FILES
+# ============================================================================
+
+# Include configuration files
+include pyproject.toml
+include setup.cfg
+include requirements*.txt
+include .gitignore
+
+# ============================================================================
+# PACKAGE DATA
+# ============================================================================
+
+# Include package-specific data files
+recursive-include bitchute *.py
+recursive-include bitchute *.txt
+recursive-include bitchute *.md
+recursive-include bitchute *.json
+recursive-include bitchute *.yaml
+recursive-include bitchute *.yml
+
+# ============================================================================
+# EXAMPLES AND DOCUMENTATION
+# ============================================================================
+
+# Include examples
+include examples.ipynb
+recursive-include examples *.py
+recursive-include examples *.ipynb
+recursive-include examples *.md
+
+# Include documentation source files
+recursive-include docs *.rst
+recursive-include docs *.md
+recursive-include docs *.py
+recursive-include docs *.txt
+recursive-include docs Makefile
+recursive-include docs make.bat
+
+# ============================================================================
+# TESTS (optional - usually not included in distribution)
+# ============================================================================
+
+# Include test files (uncomment if you want tests in the distribution)
+# recursive-include tests *.py
+# recursive-include tests *.txt
+# recursive-include tests *.json
+
+# ============================================================================
+# EXCLUDE PATTERNS
+# ============================================================================
+
+# Exclude development and build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.dylib
+
+# Exclude development directories
+prune .git
+prune .vscode
+prune .idea
+prune __pycache__
+prune .pytest_cache
+prune .mypy_cache
+prune .coverage
+prune htmlcov
+prune build
+prune dist
+prune *.egg-info
+
+# Exclude development files
+exclude .pre-commit-config.yaml
+exclude .gitignore
+exclude .gitattributes
+exclude tox.ini
+exclude Makefile
+
+# Exclude backup and temporary files
+exclude *~
+exclude *.bak
+exclude *.swp
+exclude *.tmp
+
+# Exclude OS specific files
+exclude Thumbs.db
+exclude .DS_Store
+
+# ============================================================================
+# SPECIFIC INCLUSIONS (if needed)
+# ============================================================================
+
+# Force include specific files if they match exclude patterns
+# include some_important_file.txt
