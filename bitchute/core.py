@@ -105,7 +105,6 @@ class BitChuteAPI:
         self.max_workers = max_workers
         self.enable_downloads = enable_downloads
         
-        # Initialize logging
         self._setup_logging()
         
         # Initialize core components
@@ -172,7 +171,6 @@ class BitChuteAPI:
             )
         })
         
-        # Configure retry strategy
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
         
@@ -734,13 +732,13 @@ class BitChuteAPI:
         
         return details_map
 
-    def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
-        """
-        Apply fetched detailed info to Channel objects.
+def _apply_channel_details_to_channels(self, channels: List, details_map: Dict[str, Dict[str, Any]]):
+        """Apply fetched detailed information to Channel objects.
         
         Args:
-            channels: List of Channel objects to enrich.
-            details_map: Details from _fetch_channel_details_parallel().
+            channels: List of Channel objects to enrich with detailed information.
+            details_map: Dictionary mapping channel IDs to their detailed info from
+                _fetch_channel_details_parallel().
         """
         for channel in channels:
             if channel.id in details_map:
@@ -764,20 +762,19 @@ class BitChuteAPI:
                     channel.live_stream_enabled = bool(full_details.get('live_stream_enabled', channel.live_stream_enabled))
                     channel.feature_video = full_details.get('feature_video', channel.feature_video)
                 
-                # Apply social links (new field)
+                # Apply social links
                 social_links = details.get('social_links', [])
-                channel.social_links = social_links  # This will now work because we added the field
+                channel.social_links = social_links
 
     def _ensure_consistent_channel_schema(self, df: pd.DataFrame, include_details: bool = False):
-        """
-        Ensure DataFrame has consistent channel schema
+        """Ensure DataFrame has consistent channel schema across all channel functions.
         
         Args:
-            df: DataFrame to standardize
-            include_details: Whether detailed fields should be included
+            df: DataFrame to standardize.
+            include_details: Whether detailed fields should be included in the schema.
             
         Returns:
-            DataFrame with consistent columns and types
+            DataFrame with consistent columns and types.
         """
         # Basic channel columns (always present)
         basic_columns = {
@@ -815,20 +812,18 @@ class BitChuteAPI:
                 'show_rantrave': True,
                 'live_stream_enabled': False,
                 'feature_video': None,
-                'social_links': []  # NEW: List of social media links
+                'social_links': []
             }
             basic_columns.update(detailed_columns)
         
         # Handle empty DataFrame
         if df.empty:
-            # Create empty DataFrame with correct columns
             empty_df = pd.DataFrame(columns=list(basic_columns.keys()))
             return empty_df
         
-        # Add missing columns with default values - FIXED approach
+        # Add missing columns with default values
         for col, default_val in basic_columns.items():
             if col not in df.columns:
-                # FIXED: Use scalar for non-list defaults, appropriate value for lists
                 if isinstance(default_val, list):
                     # For list columns like social_links, create list for each row
                     df[col] = [default_val.copy() for _ in range(len(df))]
@@ -867,21 +862,39 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """
-        Get trending videos with optional detail fetching and downloads
+        """Get trending videos from BitChute with optional detail fetching and downloads.
         
         Args:
-            timeframe: 'day', 'week', or 'month'
-            limit: Total number of videos to retrieve. Defaults to the 20 videos shown as trending on the frontend. 
-            include_details: Fetch like/dislike counts and media URLs
-            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
-            download_videos: Download video files (requires enable_downloads=True)
-            force_redownload: Override instance force_redownload setting
+            timeframe: Trending period ('day', 'week', or 'month').
+            limit: Maximum number of videos to retrieve. Defaults to 20 videos 
+                shown as trending on the frontend.
+            include_details: Whether to fetch like/dislike counts and media URLs.
+            download_thumbnails: Whether to download thumbnail images 
+                (requires enable_downloads=True).
+            download_videos: Whether to download video files 
+                (requires enable_downloads=True).
+            force_redownload: Override instance force_redownload setting.
             
         Returns:
-            DataFrame with all requested videos, details, and local file paths
+            DataFrame with all requested videos, details, and local file paths.
+            
+        Raises:
+            ValidationError: If timeframe is invalid or limit is less than 1.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get trending videos for today
+            >>> trending = api.get_trending_videos('day', limit=10)
+            >>> print(f"Found {len(trending)} trending videos")
+            
+            >>> # Get trending videos with downloads
+            >>> trending = api.get_trending_videos(
+            ...     'week',
+            ...     limit=50,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
         """
-
         # Validate inputs
         self.validator.validate_timeframe(timeframe)
         if limit < 1:
@@ -902,7 +915,6 @@ class BitChuteAPI:
             include_details = True
         
         while total_retrieved < limit:
-            # FIXED: Calculate how many to fetch this page
             remaining = limit - total_retrieved
             page_limit = min(per_page, remaining)
             
@@ -924,20 +936,18 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop when we reach the exact limit
                 if len(all_videos) + len(videos) >= limit:
                     videos = videos[:limit - len(all_videos)]
                     break
             
             if videos:
                 all_videos.extend(videos)
-                total_retrieved = len(all_videos)  # FIXED: Use actual count
+                total_retrieved = len(all_videos)
                 offset += len(videos)
                 
                 if self.verbose:
                     logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
             
-            # FIXED: Check if we reached the exact limit
             if total_retrieved >= limit:
                 break
             
@@ -995,8 +1005,34 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
+        """Get popular videos from BitChute with optional detail fetching and downloads.
         
-        """Get popular videos"""
+        Args:
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch engagement metrics and media URLs.
+            download_thumbnails: Whether to download thumbnail images.
+            download_videos: Whether to download video files.
+            force_redownload: Override instance force_redownload setting.
+            
+        Returns:
+            DataFrame containing popular videos with consistent schema.
+            
+        Raises:
+            ValidationError: If limit is less than 1.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get popular videos
+            >>> popular = api.get_popular_videos(limit=100)
+            >>> print(f"Found {len(popular)} popular videos")
+            
+            >>> # Get popular videos with details and downloads
+            >>> popular = api.get_popular_videos(
+            ...     limit=50,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
+        """
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
         
@@ -1009,7 +1045,6 @@ class BitChuteAPI:
             include_details = True
         
         while len(all_videos) < limit:
-            # Calculate exact amount needed
             remaining = limit - len(all_videos)
             page_limit = min(per_page, remaining)
             
@@ -1032,7 +1067,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) + len(videos) >= limit:
                     break
             
@@ -1040,7 +1074,6 @@ class BitChuteAPI:
                 all_videos.extend(videos)
                 offset += len(videos)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) >= limit:
                     all_videos = all_videos[:limit]
                     break
@@ -1096,7 +1129,33 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """Get recent videos"""
+        """Get recent videos from BitChute with optional detail fetching and downloads.
+        
+        Args:
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch engagement metrics and media URLs.
+            download_thumbnails: Whether to download thumbnail images.
+            download_videos: Whether to download video files.
+            force_redownload: Override instance force_redownload setting.
+            
+        Returns:
+            DataFrame containing recent videos with consistent schema.
+            
+        Raises:
+            ValidationError: If limit is less than 1.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get recent videos
+            >>> recent = api.get_recent_videos(limit=30)
+            >>> print(f"Found {len(recent)} recent videos")
+            
+            >>> # Get recent videos with details
+            >>> recent = api.get_recent_videos(
+            ...     limit=100,
+            ...     include_details=True
+            ... )
+        """
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
         
@@ -1131,7 +1190,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) + len(videos) >= limit:
                     break
             
@@ -1139,7 +1197,6 @@ class BitChuteAPI:
                 all_videos.extend(videos)
                 offset += len(videos)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) >= limit:
                     all_videos = all_videos[:limit]
                     break
@@ -1196,27 +1253,32 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """
-        Get all videos (convenience method for getting many recent videos) with optional downloads
+        """Get all videos (convenience method for getting many recent videos) with optional downloads.
         
         This is a convenience wrapper around get_recent_videos with higher default limit.
         
         Args:
-            limit: Total number of videos to retrieve (default: 1000)
-            include_details: Fetch like/dislike counts and media URLs (default: False)
-            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
-            download_videos: Download video files (requires enable_downloads=True)
-            force_redownload: Override instance force_redownload setting
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch like/dislike counts and media URLs.
+            download_thumbnails: Whether to download thumbnail images 
+                (requires enable_downloads=True).
+            download_videos: Whether to download video files 
+                (requires enable_downloads=True).
+            force_redownload: Override instance force_redownload setting.
             
         Returns:
-            DataFrame with all requested videos and consistent schema
+            DataFrame with all requested videos and consistent schema.
             
         Example:
             >>> # Get 1000 most recent videos
             >>> df = api.get_all_videos()
             
             >>> # Get 5000 videos with details and thumbnails
-            >>> df = api.get_all_videos(limit=5000, include_details=True, download_thumbnails=True)
+            >>> df = api.get_all_videos(
+            ...     limit=5000, 
+            ...     include_details=True, 
+            ...     download_thumbnails=True
+            ... )
         """
         if self.verbose:
             logger.info(f"Getting all videos (up to {limit})")
@@ -1228,6 +1290,7 @@ class BitChuteAPI:
             download_videos=download_videos,
             force_redownload=force_redownload
         )
+
     def get_short_videos(
         self, 
         limit: int = 1000, 
@@ -1236,18 +1299,35 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """
-        Get short videos with optional parallel detail fetching and downloads
+        """Get short videos with optional parallel detail fetching and downloads.
      
         Args:
-            limit: Total number of videos to retrieve (default: 50)
-            include_details: Fetch like/dislike counts and media URLs (default: False)
-            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
-            download_videos: Download video files (requires enable_downloads=True)
-            force_redownload: Override instance force_redownload setting
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch like/dislike counts and media URLs.
+            download_thumbnails: Whether to download thumbnail images 
+                (requires enable_downloads=True).
+            download_videos: Whether to download video files 
+                (requires enable_downloads=True).
+            force_redownload: Override instance force_redownload setting.
              
         Returns:
-            DataFrame with all requested videos and consistent schema
+            DataFrame with all requested videos and consistent schema.
+            
+        Raises:
+            ValidationError: If limit is less than 1.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get short videos
+            >>> shorts = api.get_short_videos(limit=50)
+            >>> print(f"Found {len(shorts)} short videos")
+            
+            >>> # Get short videos with downloads
+            >>> shorts = api.get_short_videos(
+            ...     limit=100,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
         """
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
@@ -1331,7 +1411,6 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
-    
     def get_member_picked_videos(
         self, 
         limit: int = 100, 
@@ -1340,18 +1419,39 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """
-        Get member picked videos with optional parallel detail fetching and downloads
+        """Get member-picked videos with optional parallel detail fetching and downloads.
         
         Args:
-            limit: Total number of videos to retrieve (default: 50)
-            include_details: Fetch like/dislike counts and media URLs (default: False)
-            download_thumbnails: Download thumbnail images (requires enable_downloads=True)
-            download_videos: Download video files (requires enable_downloads=True)
-            force_redownload: Override instance force_redownload setting
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch like/dislike counts and media URLs.
+            download_thumbnails: Whether to download thumbnail images 
+                (requires enable_downloads=True).
+            download_videos: Whether to download video files 
+                (requires enable_downloads=True).
+            force_redownload: Override instance force_redownload setting.
             
         Returns:
-            DataFrame with member picked videos and consistent schema
+            DataFrame with member-picked videos and consistent schema.
+            
+        Raises:
+            ValidationError: If limit is less than 1.
+            BitChuteAPIError: If the API request fails.
+            
+        Note:
+            The date_liked data point is lost due to data structure processing.
+            This is a possible future enhancement.
+            
+        Example:
+            >>> # Get member-picked videos
+            >>> picked = api.get_member_picked_videos(limit=50)
+            >>> print(f"Found {len(picked)} member-picked videos")
+            
+            >>> # Get with details and downloads
+            >>> picked = api.get_member_picked_videos(
+            ...     limit=100,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
         """
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
@@ -1365,12 +1465,10 @@ class BitChuteAPI:
         if download_videos:
             include_details = True
         
-        # Add pagination support like other methods
         while total_retrieved < limit:
             remaining = limit - total_retrieved
             page_limit = min(per_page, remaining)
             
-            # FIXED: Use consistent payload structure with offset/limit
             payload = {
                 "offset": offset,
                 "limit": page_limit
@@ -1379,16 +1477,13 @@ class BitChuteAPI:
             if self.verbose:
                 logger.info(f"Fetching member picked videos: offset={offset}, limit={page_limit}")
             
-            # Use original endpoint with consistent payload structure
             data = self._make_request("beta/member_liked_videos", payload)
             if not data or 'videos' not in data or not data['videos']:
                 if self.verbose:
                     logger.warning("No data returned from member picked videos endpoint")
                 break
             
-            # Process data to fit default data structure. 
-            # As a result the date_liked data point is lost. >> POSSIBLE FUTURE ENHANCEMENT
-            
+            # Process data to fit default data structure
             data['videos'] = [v['video'] for v in data['videos']]
             
             videos = []
@@ -1396,7 +1491,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit like other methods
                 if len(all_videos) + len(videos) >= limit:
                     videos = videos[:limit - len(all_videos)]
                     break
@@ -1409,7 +1503,6 @@ class BitChuteAPI:
                 if self.verbose:
                     logger.info(f"Retrieved {len(videos)} videos (total: {total_retrieved}/{limit})")
             
-            #Check if we reached the exact limit
             if total_retrieved >= limit:
                 break
             
@@ -1419,18 +1512,17 @@ class BitChuteAPI:
                     logger.info("Fewer videos returned than requested, end of data reached")
                 break
             
-            #Add rate limiting between requests like other methods
             if total_retrieved < limit:
                 time.sleep(self.rate_limiter.rate_limit)
 
-        # Parallel detail fetching if requested (same as other methods)
+        # Parallel detail fetching if requested
         if include_details and all_videos:
             video_ids = [video.id for video in all_videos if video.id]
             if video_ids:
                 details_map = self._fetch_details_parallel(video_ids)
                 self._apply_details_to_videos(all_videos, details_map)
 
-        # Process downloads if requested (same as other methods)
+        # Process downloads if requested
         if (download_thumbnails or download_videos) and all_videos:
             all_videos = self._process_downloads(
                 all_videos, 
@@ -1439,7 +1531,7 @@ class BitChuteAPI:
                 force_redownload=force_redownload
             )
         
-        # Convert to DataFrame with consistent schema (same as other methods)
+        # Convert to DataFrame with consistent schema
         if all_videos:
             video_dicts = [asdict(video) for video in all_videos]
             df = pd.DataFrame(video_dicts)
@@ -1462,16 +1554,24 @@ class BitChuteAPI:
         
         return self._ensure_consistent_schema(pd.DataFrame())
 
-
     def get_trending_hashtags(self, limit: int = 1000) -> pd.DataFrame:
-        """
-        Get trending hashtags with automatic pagination
+        """Get trending hashtags with automatic pagination.
         
         Args:
-            limit: Total number of hashtags to retrieve (default: 50)
+            limit: Maximum number of hashtags to retrieve.
             
         Returns:
-            DataFrame with all hashtags
+            DataFrame with all hashtags.
+            
+        Raises:
+            ValidationError: If limit is invalid or exceeds maximum allowed.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get trending hashtags
+            >>> hashtags = api.get_trending_hashtags(limit=50)
+            >>> print(f"Found {len(hashtags)} trending hashtags")
+            >>> print(hashtags[['name', 'rank']].head())
         """
         self.validator.validate_limit(limit, max_limit=1000)
         
@@ -1532,8 +1632,36 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """Get hashtag videos with download support and EXACT limit respect"""
+        """Get videos associated with a specific hashtag.
 
+        Args:
+            hashtag: Hashtag name (with or without # prefix).
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch engagement metrics and media URLs.
+            download_thumbnails: Whether to download thumbnail images.
+            download_videos: Whether to download video files.
+            force_redownload: Override instance force_redownload setting.
+            
+        Returns:
+            DataFrame containing hashtag videos with consistent schema.
+            
+        Raises:
+            ValidationError: If hashtag format is invalid.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get videos for a hashtag
+            >>> videos = api.get_videos_by_hashtag('climate', limit=20)
+            >>> print(f"Found {len(videos)} videos for #climate")
+            
+            >>> # Get videos with downloads
+            >>> videos = api.get_videos_by_hashtag(
+            ...     '#bitcoin',
+            ...     limit=50,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
+        """
         # Validate and clean hashtag
         if not hashtag or not isinstance(hashtag, str):
             raise ValidationError("Hashtag must be a non-empty string", "hashtag")
@@ -1542,7 +1670,8 @@ class BitChuteAPI:
         if not clean_hashtag:
             raise ValidationError("Hashtag cannot be empty after cleaning", "hashtag")
         
-        if not re.match(r'^[a-zA-Z0-9_-]+$', clean_hashtag):
+        if not re.match(r'^[a-zA-Z0-9_-]+
+        , clean_hashtag):
             raise ValidationError(f"Invalid hashtag format: '{hashtag}'", "hashtag")
         
         if self.verbose:
@@ -1578,7 +1707,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) + len(videos) >= limit:
                     break
             
@@ -1586,7 +1714,6 @@ class BitChuteAPI:
                 all_videos.extend(videos)
                 offset += len(videos)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) >= limit:
                     all_videos = all_videos[:limit]
                     break
@@ -1652,9 +1779,40 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """Search videos"""
-        # Validate inputs
+        """Search for videos using the BitChute search API.
         
+        Args:
+            query: Search query string (max 100 characters).
+            sensitivity: Content sensitivity level ('normal', 'nsfw', 'nsfl').
+            sort: Sort order ('new', 'old', 'views').
+            limit: Maximum number of videos to retrieve.
+            include_details: Whether to fetch engagement metrics and media URLs.
+            download_thumbnails: Whether to download thumbnail images.
+            download_videos: Whether to download video files.
+            force_redownload: Override instance force_redownload setting.
+            
+        Returns:
+            DataFrame containing search results with consistent schema.
+            
+        Raises:
+            ValidationError: If query is invalid or parameters are out of range.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Basic search
+            >>> results = api.search_videos('bitcoin', limit=20)
+            >>> print(f"Found {len(results)} videos")
+            
+            >>> # Advanced search with downloads
+            >>> results = api.search_videos(
+            ...     'climate change',
+            ...     sensitivity='normal',
+            ...     sort='views',
+            ...     limit=50,
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
+        """
         self.validator.validate_search_query(query)
         if limit < 1:
             raise ValidationError("Total limit must be at least 1", "limit")
@@ -1699,7 +1857,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) + len(videos) >= limit:
                     break
             
@@ -1707,7 +1864,6 @@ class BitChuteAPI:
                 all_videos.extend(videos)
                 offset += len(videos)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) >= limit:
                     all_videos = all_videos[:limit]
                     break
@@ -1764,25 +1920,33 @@ class BitChuteAPI:
         limit: int = 50,
         include_details: bool = False
     ) -> pd.DataFrame:
-        """
-        Search for channels with optional parallel detail fetching
+        """Search for channels using the BitChute search API.
         
         Args:
-            query: Search query
-            sensitivity: Content sensitivity level
-            limit: Total number of results to retrieve (default: 50)
-            include_details: Fetch full channel details and profile links (default: False)
+            query: Search query string.
+            sensitivity: Content sensitivity level ('normal', 'nsfw', 'nsfl').
+            limit: Maximum number of channels to retrieve.
+            include_details: Whether to fetch detailed channel information and social links.
             
         Returns:
-            DataFrame with all search results and detailed info if requested
+            DataFrame containing channel search results with consistent schema.
+            
+        Raises:
+            ValidationError: If query is invalid or parameters are out of range.
+            BitChuteAPIError: If the API request fails.
             
         Example:
-            >>> # Basic search
+            >>> # Basic channel search
             >>> channels = api.search_channels('climate', limit=10)
+            >>> print(f"Found {len(channels)} channels")
             
-            >>> # With detailed info (subscriber counts, descriptions, social links)
-            >>> detailed = api.search_channels('climate', limit=10, include_details=True)
-            >>> print(detailed.columns)  # Includes full channel details + social_links
+            >>> # Search with detailed info
+            >>> detailed = api.search_channels(
+            ...     'climate', 
+            ...     limit=10, 
+            ...     include_details=True
+            ... )
+            >>> print(detailed[['name', 'subscriber_count', 'video_count']])
         """
         self.validator.validate_search_query(query)
         if limit < 1:
@@ -1820,7 +1984,6 @@ class BitChuteAPI:
                 channel = self.data_processor.parse_channel(channel_data, offset + i)
                 channels.append(channel)
                 
-                # Stop exactly at limit
                 if len(all_channels) + len(channels) >= limit:
                     break
             
@@ -1828,7 +1991,6 @@ class BitChuteAPI:
                 all_channels.extend(channels)
                 offset += len(channels)
                 
-                # Stop exactly at limit
                 if len(all_channels) >= limit:
                     all_channels = all_channels[:limit]
                     break
@@ -1876,8 +2038,38 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        """Get channel videos with download support and EXACT limit respect"""
-
+        """Get videos from a specific channel.
+        
+        Args:
+            channel_id: Channel identifier.
+            limit: Maximum number of videos to retrieve.
+            order_by: Video ordering ('latest', 'popular', 'oldest').
+            include_details: Whether to fetch engagement metrics and media URLs.
+            download_thumbnails: Whether to download thumbnail images.
+            download_videos: Whether to download video files.
+            force_redownload: Override instance force_redownload setting.
+            
+        Returns:
+            DataFrame containing channel videos with consistent schema.
+            
+        Raises:
+            ValidationError: If channel_id is invalid or parameters are out of range.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get latest videos from a channel
+            >>> videos = api.get_channel_videos('channel123', limit=20)
+            >>> print(f"Found {len(videos)} videos from channel")
+            
+            >>> # Get popular videos with downloads
+            >>> videos = api.get_channel_videos(
+            ...     'channel123',
+            ...     limit=50,
+            ...     order_by='popular',
+            ...     include_details=True,
+            ...     download_thumbnails=True
+            ... )
+        """
         # Validate inputs
         if not channel_id or not isinstance(channel_id, str):
             raise ValidationError("Channel ID must be a non-empty string", "channel_id")
@@ -1916,7 +2108,6 @@ class BitChuteAPI:
                 video = self.data_processor.parse_video(video_data, offset + i)
                 videos.append(video)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) + len(videos) >= limit:
                     break
             
@@ -1924,7 +2115,6 @@ class BitChuteAPI:
                 all_videos.extend(videos)
                 offset += len(videos)
                 
-                # FIXED: Stop exactly at limit
                 if len(all_videos) >= limit:
                     all_videos = all_videos[:limit]
                     break
@@ -1987,26 +2177,42 @@ class BitChuteAPI:
         download_videos: bool = False,
         force_redownload: Optional[bool] = None
     ) -> pd.DataFrame:
-        
-        """
-        Get detailed video information as single-row DataFrame for consistency
+        """Get detailed video information as single-row DataFrame for consistency.
         
         Args:
-            video_id: Video ID to fetch details for
-            include_counts: Include like/dislike/view counts
-            include_media: Include media URL
-            download_thumbnails: Download thumbnail image (requires enable_downloads=True)
-            download_videos: Download video file (requires enable_downloads=True)  
-            force_redownload: Override instance force_redownload setting
+            video_id: Video ID to fetch details for.
+            include_counts: Whether to include like/dislike/view counts.
+            include_media: Whether to include media URL.
+            download_thumbnails: Whether to download thumbnail image 
+                (requires enable_downloads=True).
+            download_videos: Whether to download video file 
+                (requires enable_downloads=True).
+            force_redownload: Override instance force_redownload setting.
             
         Returns:
-            Single-row DataFrame with video information
+            Single-row DataFrame with video information.
+            
+        Raises:
+            ValidationError: If video_id format is invalid.
+            BitChuteAPIError: If the API request fails.
             
         Note:
             This method now returns a DataFrame for consistency. 
             Use get_video_object() if you need a Video object.
+            
+        Example:
+            >>> # Get video info as DataFrame
+            >>> video_df = api.get_video_info('CLrgZP4RWyly')
+            >>> print(video_df[['title', 'view_count', 'duration']])
+            
+            >>> # Get video with downloads
+            >>> video_df = api.get_video_info(
+            ...     'CLrgZP4RWyly',
+            ...     include_counts=True,
+            ...     download_thumbnails=True,
+            ...     download_videos=True
+            ... )
         """
-        
         # Get video object first
         video = self.get_video_object(
             video_id=video_id,
@@ -2052,21 +2258,30 @@ class BitChuteAPI:
         include_counts: bool = True, 
         include_media: bool = False
     ) -> Optional[Video]:
-        """
-        Get detailed video information as Video object
+        """Get detailed video information as Video object.
         
         This method provides object-based access for users who need the Video object interface.
         For consistency with other methods, prefer get_video_info() which returns a DataFrame.
         
         Args:
-            video_id: Video ID to fetch details for
-            include_counts: Include like/dislike/view counts  
-            include_media: Include media URL
+            video_id: Video ID to fetch details for.
+            include_counts: Whether to include like/dislike/view counts.
+            include_media: Whether to include media URL.
             
         Returns:
-            Video object or None if not found
+            Video object or None if not found.
+            
+        Raises:
+            ValidationError: If video_id format is invalid.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get video as object
+            >>> video = api.get_video_object('CLrgZP4RWyly')
+            >>> if video:
+            ...     print(f"Title: {video.title}")
+            ...     print(f"Views: {video.view_count}")
         """
-        # Move existing get_video_info logic here
         self.validator.validate_video_id(video_id)
         
         payload = {"video_id": video_id}
@@ -2108,7 +2323,14 @@ class BitChuteAPI:
         return video
 
     def _parse_video_info(self, data: Dict[str, Any]) -> Video:
-        """Parse video details from beta9/video endpoint"""
+        """Parse video details from beta9/video endpoint.
+        
+        Args:
+            data: Raw video data from API response.
+            
+        Returns:
+            Parsed Video object with all available fields populated.
+        """
         video = Video()
         
         # Basic fields
@@ -2136,7 +2358,7 @@ class BitChuteAPI:
             video.channel_id = channel_data.get('channel_id', '')
             video.channel_name = channel_data.get('channel_name', '')
         
-        # FIXED: Hashtags with proper parsing
+        # Hashtags with proper parsing
         hashtags_data = data.get('hashtags', [])
         if hashtags_data:
             video.hashtags = []
@@ -2170,19 +2392,27 @@ class BitChuteAPI:
         
         return video
 
-    def get_channel_info(self, channel_id: str) -> pd.DataFrame:
-        """
-        Get detailed channel information as single-row DataFrame for consistency
+def get_channel_info(self, channel_id: str) -> pd.DataFrame:
+        """Get detailed channel information as single-row DataFrame for consistency.
         
         Args:
-            channel_id: Channel ID to fetch details for
+            channel_id: Channel ID to fetch details for.
             
         Returns:
-            Single-row DataFrame with channel information
+            Single-row DataFrame with channel information.
+            
+        Raises:
+            ValidationError: If channel_id format is invalid.
+            BitChuteAPIError: If the API request fails.
             
         Note:
             This method now returns a DataFrame for consistency.
             Use get_channel_object() if you need a Channel object.
+            
+        Example:
+            >>> # Get channel info as DataFrame
+            >>> channel_df = api.get_channel_info('channel123')
+            >>> print(channel_df[['name', 'video_count', 'subscriber_count']])
         """
         # Get channel object first
         channel = self.get_channel_object(channel_id)
@@ -2200,19 +2430,28 @@ class BitChuteAPI:
         return df
 
     def get_channel_object(self, channel_id: str) -> Optional[Channel]:
-        """
-        Get detailed channel information as Channel object
+        """Get detailed channel information as Channel object.
         
         This method provides object-based access for users who need the Channel object interface.
         For consistency with other methods, prefer get_channel_info() which returns a DataFrame.
         
         Args:
-            channel_id: Channel ID to fetch details for
+            channel_id: Channel ID to fetch details for.
             
         Returns:
-            Channel object or None if not found
+            Channel object or None if not found.
+            
+        Raises:
+            ValidationError: If channel_id format is invalid.
+            BitChuteAPIError: If the API request fails.
+            
+        Example:
+            >>> # Get channel as object
+            >>> channel = api.get_channel_object('channel123')
+            >>> if channel:
+            ...     print(f"Name: {channel.name}")
+            ...     print(f"Videos: {channel.video_count}")
         """
-        # Move existing get_channel_info logic here
         if not channel_id or not isinstance(channel_id, str):
             raise ValidationError("Channel ID must be a non-empty string", "channel_id")
         
@@ -2232,7 +2471,14 @@ class BitChuteAPI:
         return channel
 
     def _parse_channel_info(self, data: Dict[str, Any]) -> Channel:
-        """Parse channel details from beta/channel endpoint"""
+        """Parse channel details from beta/channel endpoint.
+        
+        Args:
+            data: Raw channel data from API response.
+            
+        Returns:
+            Parsed Channel object with all available fields populated.
+        """
         channel = Channel()
         
         # Core fields
@@ -2285,7 +2531,18 @@ class BitChuteAPI:
         return channel
 
     def get_download_stats(self) -> Dict[str, Any]:
-        """Get download statistics if downloads are enabled"""
+        """Get download statistics if downloads are enabled.
+        
+        Returns:
+            Dictionary containing download statistics including success rates,
+            total bytes downloaded, and operation counts.
+            
+        Example:
+            >>> # Check download performance
+            >>> stats = api.get_download_stats()
+            >>> print(f"Success rate: {stats['success_rate']:.1%}")
+            >>> print(f"Total downloaded: {stats['total_bytes_formatted']}")
+        """
         if not self.enable_downloads or not self.download_manager:
             return {"downloads_enabled": False}
         
@@ -2294,13 +2551,30 @@ class BitChuteAPI:
         return stats
 
     def reset_download_stats(self):
-        """Reset download statistics"""
+        """Reset download statistics to zero.
+        
+        Example:
+            >>> # Reset stats after a batch operation
+            >>> api.reset_download_stats()
+        """
         if self.enable_downloads and self.download_manager:
             self.download_manager.reset_stats()
 
-    # Update cleanup method to include download manager
     def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources including sessions and download manager.
+        
+        This method should be called when done using the API client to properly
+        close connections and clean up temporary resources.
+        
+        Example:
+            >>> # Proper cleanup
+            >>> api = BitChuteAPI()
+            >>> try:
+            ...     # Use API
+            ...     videos = api.get_trending_videos()
+            ... finally:
+            ...     api.cleanup()
+        """
         if hasattr(self, 'session'):
             self.session.close()
         
