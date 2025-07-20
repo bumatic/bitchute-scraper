@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5539420.svg)](https://doi.org/10.5281/zenodo.5539420)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5643102.svg)](https://doi.org/10.5281/zenodo.5643102)
 
 # BitChute Scraper
 
