@@ -35,6 +35,14 @@ Example:
         >>> from bitchute.utils import DataExporter
         >>> exporter = DataExporter()
         >>> exporter.export_data(results, 'search_results', ['csv', 'json'])
+
+DISCLAIMERS
+=====================================
+• Research and educational use only
+• Users must comply with ToS and applicable laws
+• Respect rate limits and server resources  
+• No warranty or liability for misuse
+
 """
 
 from .core import BitChuteAPI, SensitivityLevel, SortOrder, VideoSelection
@@ -151,6 +159,11 @@ __package_info__ = {
     ],
 }
 
+__disclaimer__ = """
+This software is for educational and research purposes only. 
+Users must comply with applicable laws and Terms of Service.
+The authors are not responsible for misuse of this software.
+"""
 
 def get_version():
     """Get the current package version.
