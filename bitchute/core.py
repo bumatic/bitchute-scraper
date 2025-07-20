@@ -95,7 +95,7 @@ class BitChuteAPI:
         max_retries: int = 3,
         max_workers: int = 8,
         enable_downloads: bool = False,
-        download_base_dir: str = "downloads",
+        download_base_dir: str = "media",
         thumbnail_folder: str = "thumbnails",
         video_folder: str = "videos",
         force_redownload: bool = False,
