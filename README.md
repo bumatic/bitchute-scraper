@@ -202,3 +202,10 @@ MIT License - see LICENSE file for details.
 
 - **Issues**: [GitHub Issues](https://github.com/bumatic/bitchute-scraper/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/bumatic/bitchute-scraper/discussions)
+
+
+## Disclaimer
+
+This software is intended for educational and research purposes only.
+Users are responsible for complying with Terms of Service and all applicable laws. 
+The software authors disclaim all liability for any misuse of this software.
