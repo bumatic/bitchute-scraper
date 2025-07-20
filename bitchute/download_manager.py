@@ -15,6 +15,7 @@ Classes:
     MediaDownloadManager: Main download manager with caching and concurrency
 """
 
+import re
 import os
 import time
 import logging
@@ -352,10 +353,16 @@ class MediaDownloadManager:
         if not filename:
             return ""
 
+        # Remove path traversal attempts
+        filename = os.path.basename(filename)
+
         # Remove or replace invalid characters
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
             filename = filename.replace(char, "_")
+
+        # Remove dangerous characters
+        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
 
         # Remove extra whitespace and replace with underscores
         filename = "_".join(filename.split())
@@ -367,7 +374,7 @@ class MediaDownloadManager:
         # Remove trailing dots and spaces
         filename = filename.rstrip(". ")
 
-        return filename
+        return filename[:255]
 
     def _resolve_filename_conflict(self, file_path: Path) -> Path:
         """Resolve filename conflicts by adding incrementing counter.
