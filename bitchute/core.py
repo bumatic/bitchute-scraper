@@ -143,6 +143,7 @@ class BitChuteAPI:
             "cache_hits": 0,
             "errors": 0,
             "last_request_time": 0,
+            "session_start_time": time.time(),
         }
 
     def _setup_logging(self):

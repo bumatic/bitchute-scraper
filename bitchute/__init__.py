@@ -282,6 +282,29 @@ Quick Start Guide:
         >>> exporter = DataExporter()
         >>> exporter.export_data(videos, 'recent_videos', ['csv', 'json', 'xlsx'])
 
+    Advanced Monitoring and Debugging:
+        >>> # Debug any token issues
+        >>> api.debug_token_issues()
+        >>> api.fix_token_issues()
+        >>> 
+        >>> # Comprehensive statistics
+        >>> api.print_stats_summary(show_detailed=True)
+        >>> 
+        >>> # Database management
+        >>> db_info = api.get_download_database_info()
+        >>> print(f"Database contains {db_info['total_entries']} unique items")
+        >>> api.cleanup_download_database()
+
+    Utility Functions:
+        >>> # Quick debugging setup
+        >>> debug_api = bitchute.create_debug_api()
+        >>> 
+        >>> # Clear all caches system-wide
+        >>> bitchute.clear_all_caches()
+        >>> 
+        >>> # Quick stats overview
+        >>> bitchute.quick_stats_check()
+
 Available Endpoints:
     Platform Recommendations:
         - get_trending_videos(timeframe, limit) - Trending videos by day/week/month
@@ -319,18 +342,35 @@ Error Handling:
     - ConfigurationError: Download configuration errors
 
 Download System Features:
-    - File Naming: {video_id}_{title}_{timestamp}.{ext}
-    - Conflict Resolution: Automatic incrementing (1), (2), etc.
-    - Progress Tracking: Optional progress bars with tqdm
-    - Concurrent Downloads: Configurable worker pool
-    - Smart Caching: Skip existing files unless forced
-    - Error Recovery: Graceful handling of failed downloads
-
+    - Content-based deduplication using URL hashing
+    - Persistent download database with metadata tracking
+    - Automatic file reuse for identical content
+    - Smart conflict resolution for different content
+    - Comprehensive download statistics and monitoring
+    - Database cleanup and optimization utilities
+    - Storage efficiency tracking and reporting
+    
 Default Parameters:
     - All methods default to retrieving 50 items
     - Pagination is automatic with 50 items per page
     - Downloads are disabled by default (enable_downloads=False)
     - Use get_all_videos() for large datasets (default: 1000 videos)
+
+Advanced Monitoring:
+    - Real-time statistics for API and download performance
+    - Deduplication effectiveness tracking  
+    - Session duration and request rate monitoring
+    - Combined reporting with formatted output
+    - Database storage and efficiency metrics
+    - Performance optimization recommendations
+
+Token Debugging System:
+    - Comprehensive authentication issue diagnosis
+    - Individual testing of all extraction methods
+    - Automatic fix attempts for common problems
+    - Detailed error reporting with specific recommendations
+    - Cache management and cleanup utilities
+    - Manual intervention guidance for complex issues
 
 Command Line Interface:
     Basic usage:
