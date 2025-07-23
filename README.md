@@ -7,12 +7,15 @@ Python scraper for the BitChute video platform. It allows you to query for video
 ## Features
 
 - **Fast API-based data collection** - 10x faster than HTML parsing approaches
+- **Intelligent content deduplication** - Never download the same file twice
 - **Automatic media downloads** - Thumbnails and videos with smart caching
 - **Comprehensive data models** - Videos, channels, hashtags with computed properties
 - **Concurrent processing** - Parallel requests with configurable rate limiting
 - **Multiple export formats** - CSV, JSON, Excel, Parquet with timestamps
 - **Command-line interface** - Easy automation and scripting support
 - **Robust error handling** - Automatic retries and graceful fallbacks
+- **Advanced monitoring** - Real-time statistics and performance tracking
+- **Token debugging tools** - Resolve authentication issues automatically
 
 ## Installation
 
@@ -90,6 +93,29 @@ exported_files = exporter.export_data(
 )
 ```
 
+### Real-time Statistics Monitoring
+
+```python
+combined_stats = api.get_combined_stats()
+
+api.print_stats_summary(show_detailed=True)
+```
+
+### Database Management
+
+```python
+# Get database information
+db_info = api.get_download_database_info()
+print(f"Database contains {db_info['total_entries']} unique items")
+print(f"Total storage tracked: {db_info['total_size_formatted']}")
+
+# Clean up orphaned entries
+api.cleanup_download_database(verify_files=True)
+
+# Reset statistics for new measurement period
+api.reset_download_stats()
+```
+
 ### Command Line Interface
 
 ```bash
@@ -125,6 +151,17 @@ bitchute popular --limit 200 --format xlsx --analyze
 - `get_trending_hashtags(limit)` - Trending hashtags
 - `get_videos_by_hashtag(hashtag, limit)` - Videos by hashtag
 
+**Statistics & Monitoring:**
+- `get_download_stats()` - Download performance metrics
+- `get_combined_stats()` - Comprehensive API and download statistics
+- `print_stats_summary()` - Formatted statistics display
+- `reset_download_stats()` - Reset performance counters
+
+**Troubleshooting:**
+- `debug_token_issues()` - Comprehensive authentication diagnosis
+- `fix_token_issues()` - Automatic token issue resolution
+- `cleanup_download_database()` - Database maintenance
+
 ### Configuration Options
 
 ```python
@@ -133,8 +170,10 @@ api = bitchute.BitChuteAPI(
     enable_downloads=True,           # Enable media downloads
     download_base_dir="data",        # Download directory
     max_concurrent_downloads=5,      # Concurrent downloads
+    force_redownload=False,          # Skip existing files
     rate_limit=0.3,                 # Seconds between requests
-    timeout=60                      # Request timeout
+    timeout=60,                     # Request timeout
+    cache_tokens=True               # Cache authentication tokens
 )
 ```
 
@@ -167,6 +206,57 @@ crypto_videos = ContentFilter.filter_by_keywords(filtered, ['bitcoin', 'crypto']
 stats = api.get_download_stats()
 print(f"Success rate: {stats['success_rate']:.1%}")
 print(f"Total downloaded: {stats['total_bytes_formatted']}")
+```
+
+## Troubleshooting Authentication Issues
+
+### Common Token Problems
+
+**Symptoms:**
+- "Token invalid, attempting refresh" messages
+- All extraction methods failing
+- Cached token corruption
+- API requests returning 401/403 errors
+
+### Automatic Diagnosis and Recovery
+
+```python
+# Step 1: Run comprehensive diagnosis
+api = bitchute.BitChuteAPI(verbose=True)
+debug_info = api.debug_token_issues()
+
+# Step 2: Attempt automatic fix
+if not debug_info['token_info']['is_valid']:
+    print("🔧 Attempting automatic recovery...")
+    token = api.fix_token_issues()
+    
+    if token:
+        print("✅ Recovery successful!")
+    else:
+        print("❌ Manual intervention required")
+
+# Step 3: Manual troubleshooting if needed
+if not token:
+    print("\n🔍 Manual troubleshooting steps:")
+    for recommendation in debug_info['recommendations']:
+        print(f"   • {recommendation}")
+```
+
+### Manual Resolution Steps
+
+```python
+# Clear all caches and retry
+api.token_manager.clear_all_caches()
+token = api.get_token()
+
+# Test specific token
+if token:
+    validation_results = api.token_manager.test_token_validation(token)
+    print(f"Token validation: {validation_results}")
+
+# Force fresh extraction
+api.token_manager.invalidate_token()
+new_token = api.token_manager.get_token()
 ```
 
 ## Documentation
@@ -209,3 +299,17 @@ MIT License - see LICENSE file for details.
 This software is intended for educational and research purposes only.
 Users are responsible for complying with Terms of Service and all applicable laws. 
 The software authors disclaim all liability for any misuse of this software.
+
+## Version History
+
+### v1.0.1 - Media Download Deduplication & Enhanced Monitoring
+- **Content-based deduplication system on the basis of a persistent download database**
+- **Comprehensive statistics and monitoring**
+- **Advanced token debugging tools**
+
+### v1.0.0 - API-Based Architecture
+- **Fast API-based data collection**
+- **Automatic media downloads**
+- **Concurrent processing**
+- **Multiple export formats**
+- **Command-line interface**
