@@ -1,18 +1,16 @@
 """
-BitChute Scraper Download Manager
+BitChute Scraper Download Manager - Improved Version with Content-Based Deduplication
 
-Manages automatic downloading of thumbnails and videos with intelligent caching,
-concurrent processing, and comprehensive error handling. Provides robust file
-management capabilities including conflict resolution, progress tracking, and
-download statistics.
+Enhanced download manager that prevents duplicate downloads of the same media content
+by using URL-based hashing and content verification. Only downloads each unique
+media file once, regardless of filename conflicts or multiple requests.
 
-This module implements a complete media download system with features including
-smart filename generation, concurrent downloads, progress tracking, and
-comprehensive statistics collection for performance monitoring.
-
-Classes:
-    DownloadProgress: Simple progress tracker when tqdm is not available
-    MediaDownloadManager: Main download manager with caching and concurrency
+Key improvements:
+- Content-based deduplication using URL hashing
+- Database of downloaded media with metadata
+- Smart filename generation without timestamps for identical content
+- Conflict resolution only for genuinely different content
+- Efficient lookup and reuse of existing downloads
 """
 
 import re
@@ -21,9 +19,10 @@ import time
 import logging
 import hashlib
 import mimetypes
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
@@ -37,52 +36,20 @@ logger = logging.getLogger(__name__)
 
 try:
     from tqdm import tqdm
-
     TQDM_AVAILABLE = True
 except ImportError:
     TQDM_AVAILABLE = False
 
 
 class DownloadProgress:
-    """Simple progress tracker when tqdm is not available.
-
-    Provides basic progress tracking functionality as a fallback when the
-    tqdm library is not installed. Displays progress information to stdout
-    with percentage completion updates.
-
-    Attributes:
-        total: Total number of items or bytes to process
-        current: Current number of items or bytes processed
-        desc: Description text to display with progress
-
-    Example:
-        >>> progress = DownloadProgress(total=100, desc="Downloading")
-        >>> for i in range(100):
-        ...     progress.update(1)
-        >>> progress.close()
-    """
-
+    """Simple progress tracker when tqdm is not available."""
+    
     def __init__(self, total: int = 0, desc: str = ""):
-        """Initialize progress tracker.
-
-        Args:
-            total: Total number of items or bytes expected
-            desc: Description text for the progress display
-        """
         self.total = total
         self.current = 0
         self.desc = desc
 
     def update(self, n: int = 1):
-        """Update progress by specified amount.
-
-        Args:
-            n: Number of items or bytes to add to current progress
-
-        Example:
-            >>> progress = DownloadProgress(total=1000, desc="Processing")
-            >>> progress.update(50)  # Add 50 to current progress
-        """
         self.current += n
         if self.total > 0:
             percent = (self.current / self.total) * 100
@@ -93,53 +60,15 @@ class DownloadProgress:
             )
 
     def close(self):
-        """Close progress tracker and print newline.
-
-        Call this method when progress tracking is complete to ensure
-        proper terminal formatting.
-        """
-        print()  # New line after progress
+        print()
 
 
 class MediaDownloadManager:
-    """Manages automatic downloading of thumbnails and videos with smart caching.
-
-    Provides comprehensive media download functionality including concurrent
-    processing, intelligent filename generation, conflict resolution, and
-    detailed progress tracking. Supports both thumbnail and video downloads
-    with configurable directory structures and caching strategies.
-
-    The manager handles automatic retry logic, file integrity checking,
-    and provides detailed statistics for monitoring download performance.
-
-    Attributes:
-        base_dir: Base directory for all downloads
-        thumbnail_folder: Subdirectory name for thumbnail files
-        video_folder: Subdirectory name for video files
-        force_redownload: Whether to redownload existing files
-        max_concurrent_downloads: Maximum number of concurrent downloads
-        timeout: Download timeout in seconds
-        verbose: Whether to enable verbose logging
-
-    Example:
-        >>> manager = MediaDownloadManager(
-        ...     base_dir="downloads",
-        ...     max_concurrent_downloads=5,
-        ...     verbose=True
-        ... )
-        >>>
-        >>> # Download single file
-        >>> success = manager.download_media(
-        ...     "https://example.com/video.mp4",
-        ...     Path("downloads/video.mp4")
-        ... )
-        >>>
-        >>> # Download multiple files concurrently
-        >>> tasks = [
-        ...     {"url": "https://example.com/thumb1.jpg", "video_id": "vid1", "media_type": "thumbnail"},
-        ...     {"url": "https://example.com/thumb2.jpg", "video_id": "vid2", "media_type": "thumbnail"}
-        ... ]
-        >>> results = manager.download_multiple(tasks)
+    """Enhanced download manager with content-based deduplication.
+    
+    Prevents duplicate downloads by tracking media URLs and reusing existing
+    files when the same content is requested multiple times. Uses URL-based
+    hashing to identify unique content and maintains a database of downloads.
     """
 
     def __init__(
@@ -152,35 +81,7 @@ class MediaDownloadManager:
         timeout: int = 30,
         verbose: bool = False,
     ):
-        """Initialize download manager with configuration options.
-
-        Args:
-            base_dir: Base directory for all downloads
-            thumbnail_folder: Subdirectory name for thumbnail files
-            video_folder: Subdirectory name for video files
-            force_redownload: Whether to redownload existing files
-            max_concurrent_downloads: Maximum number of concurrent downloads
-            timeout: Download timeout in seconds
-            verbose: Whether to enable verbose logging
-
-        Raises:
-            ConfigurationError: If directory creation fails
-
-        Example:
-            >>> # Basic configuration
-            >>> manager = MediaDownloadManager()
-            >>>
-            >>> # Advanced configuration
-            >>> manager = MediaDownloadManager(
-            ...     base_dir="/data/bitchute",
-            ...     thumbnail_folder="thumbs",
-            ...     video_folder="vids",
-            ...     force_redownload=True,
-            ...     max_concurrent_downloads=8,
-            ...     timeout=60,
-            ...     verbose=True
-            ... )
-        """
+        """Initialize enhanced download manager with deduplication."""
         self.base_dir = Path(base_dir)
         self.thumbnail_folder = thumbnail_folder
         self.video_folder = video_folder
@@ -198,25 +99,22 @@ class MediaDownloadManager:
         # Thread safety
         self._lock = threading.Lock()
 
+        # Download database for deduplication
+        self.download_db_file = self.base_dir / "download_database.json"
+        self.download_db = self._load_download_database()
+
         # Download statistics
         self.stats = {
             "total_downloads": 0,
             "successful_downloads": 0,
             "failed_downloads": 0,
             "skipped_downloads": 0,
+            "reused_downloads": 0,  # New stat for reused files
             "total_bytes": 0,
         }
 
     def _create_directories(self):
-        """Create necessary directory structure for downloads.
-
-        Creates the base directory and subdirectories for thumbnails and
-        videos if they don't already exist.
-
-        Raises:
-            ConfigurationError: If directory creation fails due to permissions
-                or filesystem issues
-        """
+        """Create necessary directory structure for downloads."""
         try:
             self.base_dir.mkdir(parents=True, exist_ok=True)
             (self.base_dir / self.thumbnail_folder).mkdir(exist_ok=True)
@@ -229,14 +127,7 @@ class MediaDownloadManager:
             raise ConfigurationError(f"Failed to create download directories: {e}")
 
     def _create_session(self) -> requests.Session:
-        """Create optimized requests session for downloads.
-
-        Configures a requests session with retry logic, timeout settings,
-        and appropriate headers for reliable media downloading.
-
-        Returns:
-            requests.Session: Configured session with retry strategy
-        """
+        """Create optimized requests session for downloads."""
         session = requests.Session()
 
         # Configure retry strategy
@@ -263,93 +154,218 @@ class MediaDownloadManager:
 
         return session
 
-    def get_file_path(
-        self, media_url: str, video_id: str, media_type: str, title: str = ""
-    ) -> Path:
-        """Generate appropriate file path for media download.
+    def _load_download_database(self) -> Dict[str, Dict[str, Any]]:
+        """Load download database from disk for deduplication tracking.
+        
+        Returns:
+            Dict mapping URL hashes to download metadata including file paths.
+        """
+        if not self.download_db_file.exists():
+            return {}
 
-        Creates a standardized file path based on the media type, video ID,
-        and optional title. Handles file extension detection, filename
-        sanitization, and conflict resolution.
+        try:
+            with open(self.download_db_file, 'r', encoding='utf-8') as f:
+                db = json.load(f)
+                
+            # Validate that files still exist and clean up orphaned entries
+            valid_db = {}
+            for url_hash, metadata in db.items():
+                file_path = Path(metadata.get('file_path', ''))
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    valid_db[url_hash] = metadata
+                elif self.verbose:
+                    logger.info(f"Cleaning orphaned database entry: {file_path}")
+                    
+            # Save cleaned database if changes were made
+            if len(valid_db) != len(db):
+                self._save_download_database(valid_db)
+                
+            return valid_db
+            
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"Failed to load download database: {e}")
+            return {}
 
+    def _save_download_database(self, db: Dict[str, Dict[str, Any]] = None):
+        """Save download database to disk for persistence.
+        
+        Args:
+            db: Optional database dict to save. Uses self.download_db if None.
+        """
+        try:
+            db_to_save = db if db is not None else self.download_db
+            with open(self.download_db_file, 'w', encoding='utf-8') as f:
+                json.dump(db_to_save, f, indent=2, ensure_ascii=False)
+                
+            if self.verbose:
+                logger.info(f"Saved download database with {len(db_to_save)} entries")
+                
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"Failed to save download database: {e}")
+
+    def _get_content_hash(self, url: str) -> str:
+        """Generate consistent hash for media URL to identify unique content.
+        
+        Creates a hash based on the URL while normalizing parameters that don't
+        affect content (like timestamps, tokens, etc.) to ensure the same content
+        gets the same hash regardless of URL variations.
+        
+        Args:
+            url: Media URL to hash
+            
+        Returns:
+            str: Consistent hash string for the content
+        """
+        try:
+            parsed = urlparse(url)
+            
+            # Create base URL without query parameters that don't affect content
+            base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            
+            # Parse query parameters and filter out ephemeral ones
+            query_params = parse_qs(parsed.query) if parsed.query else {}
+            
+            # Remove parameters that are likely temporal/session-based
+            ephemeral_params = {
+                'timestamp', 'ts', 't', 'token', 'session', 'auth', 
+                'sig', 'signature', 'expire', 'expires', '_'
+            }
+            
+            filtered_params = {
+                k: v for k, v in query_params.items() 
+                if k.lower() not in ephemeral_params
+            }
+            
+            # Sort parameters for consistency
+            if filtered_params:
+                sorted_params = sorted(filtered_params.items())
+                param_string = '&'.join(f"{k}={','.join(sorted(v))}" for k, v in sorted_params)
+                content_url = f"{base_url}?{param_string}"
+            else:
+                content_url = base_url
+                
+            # Generate hash
+            return hashlib.md5(content_url.encode('utf-8')).hexdigest()
+            
+        except Exception as e:
+            if self.verbose:
+                logger.warning(f"Failed to hash URL {url}: {e}")
+            # Fallback to simple hash of full URL
+            return hashlib.md5(url.encode('utf-8')).hexdigest()
+
+    def _get_base_filename(self, media_url: str, video_id: str, media_type: str, title: str = "") -> str:
+        """Generate base filename without timestamp for consistent naming.
+        
+        Creates a standardized filename that will be the same for identical content,
+        allowing for proper deduplication while still being descriptive.
+        
         Args:
             media_url: URL of the media to download
             video_id: Video ID for filename generation
             media_type: Type of media ('thumbnail' or 'video')
             title: Optional video title for filename enhancement
-
+            
         Returns:
-            Path: Complete file path for the download
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> path = manager.get_file_path(
-            ...     "https://example.com/video.mp4",
-            ...     "abc123",
-            ...     "video",
-            ...     "Sample Video Title"
-            ... )
-            >>> print(path)  # Path('downloads/videos/abc123_Sample_Video_Title_1640995200.mp4')
+            str: Base filename without extension
         """
-        # Determine file extension from URL or content type
+        # Sanitize title for filename
+        sanitized_title = self._sanitize_filename(title) if title else ""
+        
+        # Create base filename without timestamp
+        if sanitized_title:
+            base_filename = f"{video_id}_{sanitized_title}"
+        else:
+            base_filename = video_id
+            
+        # Limit length to prevent filesystem issues
+        if len(base_filename) > 100:
+            base_filename = base_filename[:100]
+            
+        return base_filename
+
+    def _get_file_extension(self, media_url: str, media_type: str) -> str:
+        """Determine appropriate file extension from URL or media type.
+        
+        Args:
+            media_url: URL of the media to download
+            media_type: Type of media ('thumbnail' or 'video')
+            
+        Returns:
+            str: File extension including the dot
+        """
+        # Try to get extension from URL
         parsed_url = urlparse(media_url)
         url_path = parsed_url.path
-
-        # Try to get extension from URL
         extension = Path(url_path).suffix.lower()
-
+        
         # Default extensions if not found in URL
         if not extension:
             if media_type == "thumbnail":
                 extension = ".jpg"
             else:
                 extension = ".mp4"
+                
+        return extension
 
-        # Sanitize title for filename
-        sanitized_title = self._sanitize_filename(title) if title else ""
-
-        # Generate timestamp for uniqueness
-        timestamp = int(time.time())
-
-        # Build filename
-        if sanitized_title:
-            filename = f"{video_id}_{sanitized_title}_{timestamp}{extension}"
-        else:
-            filename = f"{video_id}_{timestamp}{extension}"
-
+    def get_file_path(
+        self, media_url: str, video_id: str, media_type: str, title: str = ""
+    ) -> Path:
+        """Get file path for media, reusing existing file if same content exists.
+        
+        This is the key method for deduplication. It checks if the same content
+        has been downloaded before and returns the existing path if found.
+        
+        Args:
+            media_url: URL of the media to download
+            video_id: Video ID for filename generation
+            media_type: Type of media ('thumbnail' or 'video')
+            title: Optional video title for filename enhancement
+            
+        Returns:
+            Path: File path to use (existing file or new path)
+        """
+        # Generate content hash for deduplication
+        content_hash = self._get_content_hash(media_url)
+        
+        # Check if we already have this content
+        if content_hash in self.download_db and not self.force_redownload:
+            existing_metadata = self.download_db[content_hash]
+            existing_path = Path(existing_metadata['file_path'])
+            
+            # Verify the file still exists and is valid
+            if existing_path.exists() and existing_path.stat().st_size > 0:
+                if self.verbose:
+                    logger.info(f"Reusing existing file: {existing_path.name}")
+                return existing_path
+            else:
+                # File was deleted or corrupted, remove from database
+                if self.verbose:
+                    logger.info(f"Existing file missing, will re-download: {existing_path}")
+                del self.download_db[content_hash]
+        
+        # Generate new file path
+        base_filename = self._get_base_filename(media_url, video_id, media_type, title)
+        extension = self._get_file_extension(media_url, media_type)
+        filename = f"{base_filename}{extension}"
+        
         # Choose appropriate subfolder
         subfolder = (
             self.thumbnail_folder if media_type == "thumbnail" else self.video_folder
         )
-
+        
         # Generate full path
         file_path = self.base_dir / subfolder / filename
-
-        # Handle filename conflicts
-        if file_path.exists() and not self.force_redownload:
+        
+        # Handle filename conflicts only for different content
+        if file_path.exists():
             file_path = self._resolve_filename_conflict(file_path)
-
+            
         return file_path
 
     def _sanitize_filename(self, filename: str, max_length: int = 50) -> str:
-        """Sanitize filename for cross-platform compatibility.
-
-        Removes or replaces characters that are invalid in filenames across
-        different operating systems and ensures the filename is within
-        reasonable length limits.
-
-        Args:
-            filename: Original filename to sanitize
-            max_length: Maximum length for the sanitized filename
-
-        Returns:
-            str: Sanitized filename safe for all platforms
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> safe_name = manager._sanitize_filename("Video: Title/Test*")
-            >>> print(safe_name)  # "Video_Title_Test"
-        """
+        """Sanitize filename for cross-platform compatibility."""
         if not filename:
             return ""
 
@@ -378,22 +394,9 @@ class MediaDownloadManager:
 
     def _resolve_filename_conflict(self, file_path: Path) -> Path:
         """Resolve filename conflicts by adding incrementing counter.
-
-        When a file already exists at the target path, this method generates
-        a new filename by appending an incrementing number until a unique
-        filename is found.
-
-        Args:
-            file_path: Original file path that conflicts
-
-        Returns:
-            Path: New file path that doesn't conflict with existing files
-
-        Example:
-            >>> # If 'video.mp4' exists, returns 'video_1.mp4'
-            >>> # If 'video_1.mp4' also exists, returns 'video_2.mp4'
-            >>> manager = MediaDownloadManager()
-            >>> unique_path = manager._resolve_filename_conflict(Path("video.mp4"))
+        
+        This method is now only used for genuinely different content that
+        happens to have the same filename, not for duplicate content.
         """
         base = file_path.stem
         suffix = file_path.suffix
@@ -408,23 +411,7 @@ class MediaDownloadManager:
         return file_path
 
     def file_exists(self, file_path: Path) -> bool:
-        """Check if file exists and validate basic integrity.
-
-        Verifies that a file exists at the specified path and performs
-        basic integrity checks such as ensuring the file is not empty.
-
-        Args:
-            file_path: Path to check for file existence and integrity
-
-        Returns:
-            bool: True if file exists and appears to be valid
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> exists = manager.file_exists(Path("downloads/video.mp4"))
-            >>> if exists:
-            ...     print("File is present and valid")
-        """
+        """Check if file exists and validate basic integrity."""
         if not file_path.exists():
             return False
 
@@ -433,9 +420,6 @@ class MediaDownloadManager:
             if self.verbose:
                 logger.warning(f"Found empty file: {file_path}")
             return False
-
-        # Additional integrity checks could be added here
-        # (e.g., file header validation, checksum verification)
 
         return True
 
@@ -446,30 +430,9 @@ class MediaDownloadManager:
         show_progress: bool = True,
         expected_size: Optional[int] = None,
     ) -> bool:
-        """Download media file with progress tracking and error handling.
-
-        Downloads a media file from the specified URL to the local file path
-        with optional progress tracking, retry logic, and comprehensive error
-        handling. Supports streaming downloads for large files.
-
-        Args:
-            url: URL to download the media from
-            file_path: Local file path to save the downloaded media
-            show_progress: Whether to display download progress
-            expected_size: Expected file size in bytes for progress tracking
-
-        Returns:
-            bool: True if download completed successfully, False otherwise
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> success = manager.download_media(
-            ...     "https://example.com/video.mp4",
-            ...     Path("downloads/video.mp4"),
-            ...     show_progress=True
-            ... )
-            >>> if success:
-            ...     print("Download completed successfully")
+        """Download media file with progress tracking and database updates.
+        
+        Enhanced version that also updates the download database for deduplication.
         """
         if not url or not url.startswith(("http://", "https://")):
             if self.verbose:
@@ -523,6 +486,20 @@ class MediaDownloadManager:
             if progress:
                 progress.close()
 
+            # Update download database for deduplication
+            content_hash = self._get_content_hash(url)
+            with self._lock:
+                self.download_db[content_hash] = {
+                    'url': url,
+                    'file_path': str(file_path),
+                    'file_size': downloaded_bytes,
+                    'download_time': time.time(),
+                    'content_type': response.headers.get('content-type', '')
+                }
+                # Save database periodically (every 10 downloads)
+                if len(self.download_db) % 10 == 0:
+                    self._save_download_database()
+
             # Update statistics
             with self._lock:
                 self.stats["total_downloads"] += 1
@@ -573,43 +550,9 @@ class MediaDownloadManager:
     def download_multiple(
         self, download_tasks: List[Dict[str, Any]], show_progress: bool = True
     ) -> Dict[str, Dict[str, Optional[str]]]:
-        """Download multiple files concurrently with progress tracking.
-
-        Processes multiple download tasks concurrently using a thread pool
-        to improve overall download performance. Each task specifies the
-        media URL, video ID, media type, and optional title.
-
-        Args:
-            download_tasks: List of download task dictionaries containing:
-                - 'url': URL to download
-                - 'video_id': Video ID for file naming
-                - 'media_type': 'thumbnail' or 'video'
-                - 'title': Video title (optional)
-            show_progress: Whether to show overall progress tracking
-
-        Returns:
-            Dict[str, Dict[str, Optional[str]]]: Dictionary mapping video_id
-                to dict of media_type -> local file path. Returns None for
-                failed downloads.
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> tasks = [
-            ...     {
-            ...         "url": "https://example.com/thumb1.jpg",
-            ...         "video_id": "vid1",
-            ...         "media_type": "thumbnail",
-            ...         "title": "First Video"
-            ...     },
-            ...     {
-            ...         "url": "https://example.com/thumb2.jpg",
-            ...         "video_id": "vid2",
-            ...         "media_type": "thumbnail",
-            ...         "title": "Second Video"
-            ...     }
-            ... ]
-            >>> results = manager.download_multiple(tasks)
-            >>> print(results['vid1']['thumbnail'])  # Path to downloaded thumbnail
+        """Download multiple files concurrently with deduplication.
+        
+        Enhanced version that handles deduplication and reuse tracking.
         """
         if not download_tasks:
             return {}
@@ -636,18 +579,18 @@ class MediaDownloadManager:
         # Setup progress tracking for batch
         batch_progress = None
         if show_progress and self.verbose:
-            desc = f"Downloading {len(valid_tasks)} files"
+            desc = f"Processing {len(valid_tasks)} files"
             if TQDM_AVAILABLE:
                 batch_progress = tqdm(total=len(valid_tasks), desc=desc, unit="files")
             else:
                 batch_progress = DownloadProgress(total=len(valid_tasks), desc=desc)
 
-        def download_task(task: Dict[str, Any]) -> Tuple[str, str, Optional[str]]:
-            """Download single task and return result.
-
+        def process_download_task(task: Dict[str, Any]) -> Tuple[str, str, Optional[str]]:
+            """Process single download task with deduplication check.
+            
             Args:
                 task: Dictionary containing download task information
-
+                
             Returns:
                 Tuple of (video_id, media_type, file_path or None)
             """
@@ -657,16 +600,32 @@ class MediaDownloadManager:
             title = task.get("title", "")
 
             try:
-                # Generate file path
+                # Generate file path (includes deduplication check)
                 file_path = self.get_file_path(url, video_id, media_type, title)
-
-                # Download file (without individual progress for batch downloads)
-                success = self.download_media(url, file_path, show_progress=False)
+                
+                # Check if this is a reused file
+                content_hash = self._get_content_hash(url)
+                is_reused = (content_hash in self.download_db and 
+                           self.file_exists(file_path) and 
+                           not self.force_redownload)
+                
+                if is_reused:
+                    # File is being reused, update stats
+                    with self._lock:
+                        self.stats["reused_downloads"] += 1
+                    
+                    if self.verbose:
+                        logger.info(f"Reusing existing file for {video_id}: {file_path.name}")
+                else:
+                    # Download file (without individual progress for batch downloads)
+                    success = self.download_media(url, file_path, show_progress=False)
+                    if not success:
+                        file_path = None
 
                 if batch_progress:
                     batch_progress.update(1)
 
-                return video_id, media_type, str(file_path) if success else None
+                return video_id, media_type, str(file_path) if file_path else None
 
             except Exception as e:
                 if self.verbose:
@@ -680,7 +639,7 @@ class MediaDownloadManager:
         # Execute downloads concurrently
         with ThreadPoolExecutor(max_workers=self.max_concurrent_downloads) as executor:
             future_to_task = {
-                executor.submit(download_task, task): task for task in valid_tasks
+                executor.submit(process_download_task, task): task for task in valid_tasks
             }
 
             for future in as_completed(future_to_task):
@@ -701,6 +660,9 @@ class MediaDownloadManager:
             if media_type not in results[video_id]:
                 results[video_id][media_type] = None
 
+        # Save database after batch operation
+        self._save_download_database()
+
         if self.verbose:
             successful_count = sum(
                 1
@@ -708,38 +670,16 @@ class MediaDownloadManager:
                 for path in video_results.values()
                 if path is not None
             )
+            reused_count = self.stats["reused_downloads"]
             logger.info(
-                f"Batch download completed: {successful_count}/{len(download_tasks)} successful"
+                f"Batch completed: {successful_count}/{len(download_tasks)} successful "
+                f"({reused_count} reused existing files)"
             )
 
         return results
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get comprehensive download statistics and performance metrics.
-
-        Returns detailed statistics about download operations including
-        success rates, total bytes downloaded, and calculated performance
-        metrics.
-
-        Returns:
-            Dict[str, Any]: Dictionary containing:
-                - total_downloads: Total number of download attempts
-                - successful_downloads: Number of successful downloads
-                - failed_downloads: Number of failed downloads
-                - skipped_downloads: Number of skipped (already existing) downloads
-                - total_bytes: Total bytes downloaded
-                - success_rate: Success rate as a decimal (0.0-1.0)
-                - failure_rate: Failure rate as a decimal (0.0-1.0)
-                - skip_rate: Skip rate as a decimal (0.0-1.0)
-                - total_bytes_formatted: Human-readable formatted bytes
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> # ... perform downloads ...
-            >>> stats = manager.get_stats()
-            >>> print(f"Success rate: {stats['success_rate']:.1%}")
-            >>> print(f"Total downloaded: {stats['total_bytes_formatted']}")
-        """
+        """Get comprehensive download statistics including deduplication metrics."""
         with self._lock:
             stats = self.stats.copy()
 
@@ -750,33 +690,23 @@ class MediaDownloadManager:
             )
             stats["failure_rate"] = stats["failed_downloads"] / stats["total_downloads"]
             stats["skip_rate"] = stats["skipped_downloads"] / stats["total_downloads"]
+            stats["reuse_rate"] = stats["reused_downloads"] / stats["total_downloads"]
         else:
             stats["success_rate"] = 0.0
             stats["failure_rate"] = 0.0
             stats["skip_rate"] = 0.0
+            stats["reuse_rate"] = 0.0
 
+        # Add deduplication stats
+        stats["unique_content_items"] = len(self.download_db)
+        
         # Format bytes
         stats["total_bytes_formatted"] = self._format_bytes(stats["total_bytes"])
 
         return stats
 
     def _format_bytes(self, bytes_count: int) -> str:
-        """Format bytes in human-readable format.
-
-        Converts byte counts to human-readable format with appropriate
-        unit suffixes (B, KB, MB, GB, TB).
-
-        Args:
-            bytes_count: Number of bytes to format
-
-        Returns:
-            str: Formatted byte count with unit suffix
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> formatted = manager._format_bytes(1048576)
-            >>> print(formatted)  # "1.0 MB"
-        """
+        """Format bytes in human-readable format."""
         for unit in ["B", "KB", "MB", "GB"]:
             if bytes_count < 1024:
                 return f"{bytes_count:.1f} {unit}"
@@ -784,70 +714,87 @@ class MediaDownloadManager:
         return f"{bytes_count:.1f} TB"
 
     def reset_stats(self):
-        """Reset all download statistics to zero.
-
-        Clears all accumulated download statistics including success counts,
-        failure counts, and total bytes downloaded. Useful for starting
-        fresh statistics collection after a batch operation.
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> # ... perform downloads ...
-            >>> manager.reset_stats()  # Clear all statistics
-            >>> # ... perform new downloads with fresh statistics ...
-        """
+        """Reset all download statistics to zero."""
         with self._lock:
             self.stats = {
                 "total_downloads": 0,
                 "successful_downloads": 0,
                 "failed_downloads": 0,
                 "skipped_downloads": 0,
+                "reused_downloads": 0,
                 "total_bytes": 0,
             }
 
-    def cleanup(self):
-        """Clean up resources and close connections.
-
-        Properly closes the requests session and cleans up any resources
-        used by the download manager. Should be called when the manager
-        is no longer needed.
-
-        Example:
-            >>> manager = MediaDownloadManager()
-            >>> try:
-            ...     # Use manager for downloads
-            ...     results = manager.download_multiple(tasks)
-            ... finally:
-            ...     manager.cleanup()
+    def cleanup_database(self, verify_files: bool = True):
+        """Clean up download database by removing entries for missing files.
+        
+        Args:
+            verify_files: Whether to verify files still exist on disk
         """
+        if not verify_files:
+            return
+            
+        cleaned_count = 0
+        with self._lock:
+            entries_to_remove = []
+            
+            for content_hash, metadata in self.download_db.items():
+                file_path = Path(metadata.get('file_path', ''))
+                if not file_path.exists() or file_path.stat().st_size == 0:
+                    entries_to_remove.append(content_hash)
+                    cleaned_count += 1
+                    
+            for content_hash in entries_to_remove:
+                del self.download_db[content_hash]
+                
+        if cleaned_count > 0:
+            self._save_download_database()
+            if self.verbose:
+                logger.info(f"Cleaned {cleaned_count} orphaned entries from database")
+
+    def get_database_info(self) -> Dict[str, Any]:
+        """Get information about the download database.
+        
+        Returns:
+            Dict with database statistics and information
+        """
+        with self._lock:
+            db_size = len(self.download_db)
+            
+        total_size = 0
+        file_count = 0
+        
+        for metadata in self.download_db.values():
+            total_size += metadata.get('file_size', 0)
+            file_count += 1
+            
+        return {
+            'database_file': str(self.download_db_file),
+            'total_entries': db_size,
+            'total_files': file_count,
+            'total_size_bytes': total_size,
+            'total_size_formatted': self._format_bytes(total_size),
+            'database_exists': self.download_db_file.exists()
+        }
+
+    def cleanup(self):
+        """Clean up resources and save database."""
+        # Save database one final time
+        self._save_download_database()
+        
         if hasattr(self, "session"):
             self.session.close()
 
     def __enter__(self):
-        """Context manager entry point.
-
-        Returns:
-            MediaDownloadManager: Self for use in with statements
-        """
+        """Context manager entry point."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit point.
-
-        Automatically cleans up resources when exiting the context manager.
-
-        Args:
-            exc_type: Exception type if an exception occurred
-            exc_val: Exception value if an exception occurred
-            exc_tb: Exception traceback if an exception occurred
-        """
+        """Context manager exit point with cleanup."""
         self.cleanup()
 
     def __del__(self):
-        """Cleanup on object destruction.
-
-        Ensures resources are cleaned up when the object is garbage collected.
-        """
+        """Cleanup on object destruction."""
         try:
             self.cleanup()
         except:

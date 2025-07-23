@@ -29,7 +29,7 @@ import json
 import re
 import random
 import string
-from typing import Optional
+from typing import Optional, Dict, Any
 from pathlib import Path
 import threading
 
@@ -753,6 +753,343 @@ class TokenManager:
                 self.cache_file.exists() if self.cache_tokens else False
             ),
         }
+
+    def debug_token_status(self) -> Dict[str, Any]:
+        """Get comprehensive token status for debugging authentication issues.
+        
+        Returns detailed information about current token state, extraction methods,
+        and potential issues to help diagnose authentication problems.
+        
+        Returns:
+            Dict containing detailed token debugging information
+        """
+        debug_info = {
+            "timestamp": time.time(),
+            "token_info": self.get_token_info(),
+            "extraction_methods": {},
+            "system_info": {},
+            "recommendations": []
+        }
+        
+        # Test each extraction method
+        print("🔍 Testing token extraction methods...")
+        
+        # Method 1: Timer API
+        print("   Testing Timer API...")
+        try:
+            timer_token = self._extract_token_via_timer_api()
+            debug_info["extraction_methods"]["timer_api"] = {
+                "success": timer_token is not None,
+                "token_preview": timer_token[:10] + "..." if timer_token else None,
+                "valid_format": self._is_valid_token(timer_token) if timer_token else False
+            }
+            if timer_token:
+                print(f"   ✅ Timer API: Success ({timer_token[:10]}...)")
+            else:
+                print("   ❌ Timer API: Failed")
+        except Exception as e:
+            debug_info["extraction_methods"]["timer_api"] = {
+                "success": False,
+                "error": str(e)
+            }
+            print(f"   ❌ Timer API: Error - {e}")
+        
+        # Method 2: Token generation
+        print("   Testing Token Generation...")
+        try:
+            generated_token = self._generate_token()
+            is_valid = self._validate_generated_token(generated_token)
+            debug_info["extraction_methods"]["generation"] = {
+                "success": is_valid,
+                "token_preview": generated_token[:10] + "..." if generated_token else None,
+                "valid_format": self._is_valid_token(generated_token),
+                "api_accepted": is_valid
+            }
+            if is_valid:
+                print(f"   ✅ Token Generation: Success ({generated_token[:10]}...)")
+            else:
+                print(f"   ❌ Token Generation: API rejected token ({generated_token[:10]}...)")
+        except Exception as e:
+            debug_info["extraction_methods"]["generation"] = {
+                "success": False,
+                "error": str(e)
+            }
+            print(f"   ❌ Token Generation: Error - {e}")
+        
+        # Method 3: Web scraping
+        print("   Testing Web Scraping...")
+        try:
+            scraping_token = self._extract_token_from_page()
+            debug_info["extraction_methods"]["web_scraping"] = {
+                "success": scraping_token is not None,
+                "token_preview": scraping_token[:10] + "..." if scraping_token else None,
+                "valid_format": self._is_valid_token(scraping_token) if scraping_token else False
+            }
+            if scraping_token:
+                print(f"   ✅ Web Scraping: Success ({scraping_token[:10]}...)")
+            else:
+                print("   ❌ Web Scraping: Failed")
+        except Exception as e:
+            debug_info["extraction_methods"]["web_scraping"] = {
+                "success": False,
+                "error": str(e)
+            }
+            print(f"   ❌ Web Scraping: Error - {e}")
+        
+        # System information
+        debug_info["system_info"] = {
+            "cache_enabled": self.cache_tokens,
+            "cache_file_exists": self.cache_file.exists() if self.cache_tokens else False,
+            "webdriver_available": True,  # Assuming it's available if no import error
+            "current_token_age": time.time() - (self.expires_at - 3600) if self.expires_at > 0 else 0
+        }
+        
+        # Generate recommendations
+        recommendations = []
+        
+        # Check if all methods failed
+        all_failed = all(
+            not method.get("success", False) 
+            for method in debug_info["extraction_methods"].values()
+        )
+        
+        if all_failed:
+            recommendations.extend([
+                "All token extraction methods failed - this suggests BitChute API changes",
+                "Try running with verbose=True to see detailed error messages",
+                "Check if BitChute website is accessible in your browser",
+                "Consider using a VPN if you're in a restricted region"
+            ])
+        
+        # Check for specific issues
+        timer_failed = not debug_info["extraction_methods"].get("timer_api", {}).get("success", False)
+        if timer_failed:
+            recommendations.append("Timer API failed - BitChute may have changed this endpoint")
+        
+        generation_failed = not debug_info["extraction_methods"].get("generation", {}).get("success", False)
+        if generation_failed:
+            recommendations.append("Token generation failed - API may require specific token formats")
+        
+        scraping_failed = not debug_info["extraction_methods"].get("web_scraping", {}).get("success", False)
+        if scraping_failed:
+            recommendations.extend([
+                "Web scraping failed - BitChute may have changed their frontend",
+                "Check Chrome/WebDriver installation",
+                "Try clearing browser cache and cookies"
+            ])
+        
+        # Check cache issues
+        if debug_info["system_info"]["cache_enabled"] and debug_info["token_info"]["has_token"]:
+            if debug_info["system_info"]["current_token_age"] > 3600:  # 1 hour
+                recommendations.append("Cached token is very old - try clearing cache")
+        
+        debug_info["recommendations"] = recommendations
+        return debug_info
+
+
+    def test_token_validation(self, token: str) -> Dict[str, Any]:
+        """Test a specific token against the BitChute API to diagnose rejection reasons.
+        
+        Args:
+            token: Token to test
+            
+        Returns:
+            Dict with validation results and response details
+        """
+        if not token:
+            return {"error": "No token provided"}
+        
+        print(f"🧪 Testing token: {token[:10]}...")
+        
+        test_results = {
+            "token_preview": token[:10] + "...",
+            "format_valid": self._is_valid_token(token),
+            "api_tests": {}
+        }
+        
+        # Test with different endpoints
+        test_endpoints = [
+            {
+                "name": "videos",
+                "url": "https://api.bitchute.com/api/beta/videos",
+                "payload": {
+                    "selection": "trending-day",
+                    "offset": 0,
+                    "limit": 1,
+                    "advertisable": True,
+                }
+            },
+            {
+                "name": "timer",
+                "url": "https://api.bitchute.com/api/timer/",
+                "payload": {}
+            }
+        ]
+        
+        for test in test_endpoints:
+            try:
+                headers = {
+                    "accept": "application/json, text/plain, */*",
+                    "content-type": "application/json",
+                    "origin": "https://www.bitchute.com",
+                    "referer": "https://www.bitchute.com/",
+                    "x-service-info": token,
+                    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                }
+                
+                response = requests.post(
+                    test["url"],
+                    json=test["payload"],
+                    headers=headers,
+                    timeout=10
+                )
+                
+                test_results["api_tests"][test["name"]] = {
+                    "status_code": response.status_code,
+                    "success": response.status_code == 200,
+                    "response_size": len(response.content),
+                    "content_type": response.headers.get("content-type", ""),
+                    "error_details": response.text[:200] if response.status_code != 200 else None
+                }
+                
+                if response.status_code == 200:
+                    print(f"   ✅ {test['name']}: Success")
+                else:
+                    print(f"   ❌ {test['name']}: {response.status_code} - {response.text[:50]}...")
+                    
+            except Exception as e:
+                test_results["api_tests"][test["name"]] = {
+                    "success": False,
+                    "error": str(e)
+                }
+                print(f"   ❌ {test['name']}: Error - {e}")
+        
+        return test_results
+
+
+    def clear_all_caches(self):
+        """Clear all cached tokens and force fresh extraction.
+        
+        Useful when debugging token issues to ensure no stale data interferes.
+        """
+        print("🧹 Clearing all token caches...")
+        
+        # Clear in-memory token
+        self.token = None
+        self.expires_at = 0
+        print("   ✅ Cleared in-memory token")
+        
+        # Clear cache file
+        if self.cache_tokens and self.cache_file.exists():
+            try:
+                self.cache_file.unlink()
+                print(f"   ✅ Deleted cache file: {self.cache_file}")
+            except Exception as e:
+                print(f"   ❌ Failed to delete cache file: {e}")
+        
+        # Close webdriver if exists
+        if self.webdriver:
+            try:
+                self.webdriver.quit()
+                self.webdriver = None
+                print("   ✅ Cleared WebDriver instance")
+            except Exception as e:
+                print(f"   ❌ Failed to clear WebDriver: {e}")
+
+
+    def diagnose_and_fix(self) -> Optional[str]:
+        """Comprehensive diagnosis and automatic fix attempt for token issues.
+        
+        Runs through all debugging steps and attempts to resolve common issues.
+        
+        Returns:
+            Optional[str]: Valid token if fix was successful, None otherwise
+        """
+        print("🔧 Starting comprehensive token diagnosis...")
+        print("=" * 60)
+        
+        # Step 1: Get current status
+        debug_info = self.debug_token_status()
+        
+        # Step 2: Clear caches if all methods failed
+        all_failed = all(
+            not method.get("success", False) 
+            for method in debug_info["extraction_methods"].values()
+        )
+        
+        if all_failed:
+            print("\n🧹 All methods failed, clearing caches and retrying...")
+            self.clear_all_caches()
+            
+            # Wait a bit and retry
+            time.sleep(2)
+            token = self.get_token()
+            if token:
+                print(f"✅ Success after cache clear: {token[:10]}...")
+                return token
+        
+        # Step 3: Try each method individually with detailed output
+        print("\n🔄 Attempting individual method recovery...")
+        
+        # Try timer API first (usually most reliable)
+        try:
+            print("   Trying Timer API...")
+            token = self._extract_token_via_timer_api()
+            if token and self._validate_generated_token(token):
+                print(f"   ✅ Timer API successful: {token[:10]}...")
+                self.token = token
+                self.expires_at = time.time() + 3600
+                if self.cache_tokens:
+                    self._save_token_cache()
+                return token
+        except Exception as e:
+            print(f"   ❌ Timer API failed: {e}")
+        
+        # Try generation method
+        try:
+            print("   Trying Token Generation (multiple attempts)...")
+            for attempt in range(5):
+                token = self._generate_token()
+                if self._validate_generated_token(token):
+                    print(f"   ✅ Generation successful on attempt {attempt + 1}: {token[:10]}...")
+                    self.token = token
+                    self.expires_at = time.time() + 3600
+                    if self.cache_tokens:
+                        self._save_token_cache()
+                    return token
+                time.sleep(1)  # Brief pause between attempts
+            print("   ❌ All generation attempts failed")
+        except Exception as e:
+            print(f"   ❌ Token generation failed: {e}")
+        
+        # Try web scraping
+        try:
+            print("   Trying Web Scraping...")
+            token = self._extract_token_from_page()
+            if token:
+                print(f"   ✅ Web scraping successful: {token[:10]}...")
+                self.token = token
+                self.expires_at = time.time() + 3600
+                if self.cache_tokens:
+                    self._save_token_cache()
+                return token
+        except Exception as e:
+            print(f"   ❌ Web scraping failed: {e}")
+        
+        # Step 4: Final recommendations
+        print("\n❌ All recovery attempts failed. Recommendations:")
+        for rec in debug_info["recommendations"]:
+            print(f"   • {rec}")
+        
+        print(f"\n🔍 Additional debugging info:")
+        print(f"   • Run with verbose=True for detailed logs")
+        print(f"   • Check internet connection and BitChute accessibility")
+        print(f"   • Try from different IP/location if possible")
+        print(f"   • Check if Chrome/WebDriver needs updating")
+        
+        return None
+
+
 
     def cleanup(self):
         """Clean up resources including WebDriver and temporary files.

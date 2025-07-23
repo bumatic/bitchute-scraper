@@ -2668,22 +2668,291 @@ class BitChuteAPI:
     def get_download_stats(self) -> Dict[str, Any]:
         """Get download statistics if downloads are enabled.
 
+        Returns comprehensive download statistics including success rates,
+        total bytes downloaded, deduplication metrics, and operation counts.
+
         Returns:
-            Dictionary containing download statistics including success rates,
-            total bytes downloaded, and operation counts.
+            Dict[str, Any]: Dictionary containing download statistics including:
+                - downloads_enabled: Whether download functionality is active
+                - total_downloads: Total number of download attempts
+                - successful_downloads: Number of successful downloads
+                - failed_downloads: Number of failed downloads
+                - skipped_downloads: Number of skipped (already existing) downloads
+                - reused_downloads: Number of reused files (deduplication)
+                - total_bytes: Total bytes downloaded
+                - success_rate: Success rate as decimal (0.0-1.0)
+                - failure_rate: Failure rate as decimal (0.0-1.0)
+                - skip_rate: Skip rate as decimal (0.0-1.0)
+                - reuse_rate: File reuse rate as decimal (0.0-1.0)
+                - unique_content_items: Number of unique content items in database
+                - total_bytes_formatted: Human-readable formatted bytes
 
         Example:
+            >>> api = BitChuteAPI(enable_downloads=True, verbose=True)
+            >>> 
+            >>> # Perform some downloads
+            >>> videos = api.get_trending_videos(
+            ...     'day', 
+            ...     limit=50, 
+            ...     download_thumbnails=True
+            ... )
+            >>> 
             >>> # Check download performance
             >>> stats = api.get_download_stats()
             >>> print(f"Success rate: {stats['success_rate']:.1%}")
             >>> print(f"Total downloaded: {stats['total_bytes_formatted']}")
+            >>> print(f"Files reused: {stats['reused_downloads']}")
+            >>> print(f"Unique content items: {stats['unique_content_items']}")
         """
         if not self.enable_downloads or not self.download_manager:
-            return {"downloads_enabled": False}
+            return {
+                "downloads_enabled": False,
+                "message": "Downloads are not enabled for this API instance"
+            }
 
         stats = self.download_manager.get_stats()
         stats["downloads_enabled"] = True
         return stats
+
+
+    def get_download_database_info(self) -> Dict[str, Any]:
+        """Get information about the download database.
+
+        Returns details about the download database including total entries,
+        file count, storage usage, and database file information.
+
+        Returns:
+            Dict[str, Any]: Dictionary containing database information including:
+                - database_file: Path to database file
+                - total_entries: Number of entries in database
+                - total_files: Number of tracked files
+                - total_size_bytes: Total size of all tracked files in bytes
+                - total_size_formatted: Human-readable formatted total size
+                - database_exists: Whether database file exists on disk
+
+        Example:
+            >>> api = BitChuteAPI(enable_downloads=True)
+            >>> 
+            >>> # After some downloads
+            >>> db_info = api.get_download_database_info()
+            >>> print(f"Database contains {db_info['total_entries']} unique items")
+            >>> print(f"Total storage: {db_info['total_size_formatted']}")
+            >>> print(f"Database file: {db_info['database_file']}")
+        """
+        if not self.enable_downloads or not self.download_manager:
+            return {
+                "downloads_enabled": False,
+                "message": "Downloads are not enabled for this API instance"
+            }
+
+        return self.download_manager.get_database_info()
+
+
+    def reset_download_stats(self):
+        """Reset download statistics to zero.
+
+        Clears all accumulated download statistics including success counts,
+        failure counts, and total bytes downloaded. Useful for starting
+        fresh statistics collection after a batch operation.
+
+        Note: This only resets statistics, not the download database used
+        for deduplication. Use cleanup_download_database() for database operations.
+
+        Example:
+            >>> api = BitChuteAPI(enable_downloads=True)
+            >>> 
+            >>> # Perform some downloads
+            >>> videos = api.get_trending_videos('day', limit=20, download_thumbnails=True)
+            >>> 
+            >>> # Reset stats for new measurement period
+            >>> api.reset_download_stats()
+            >>> 
+            >>> # Perform more downloads with fresh statistics
+            >>> more_videos = api.get_popular_videos(limit=30, download_thumbnails=True)
+            >>> stats = api.get_download_stats()  # Only includes recent downloads
+        """
+        if self.enable_downloads and self.download_manager:
+            self.download_manager.reset_stats()
+            if self.verbose:
+                logger.info("Download statistics have been reset")
+        elif self.verbose:
+            logger.warning("Downloads are not enabled, no statistics to reset")
+
+
+    def cleanup_download_database(self, verify_files: bool = True):
+        """Clean up download database by removing entries for missing files.
+
+        Removes database entries for files that no longer exist on disk,
+        helping to keep the database accurate and prevent unnecessary
+        storage of orphaned metadata.
+
+        Args:
+            verify_files: Whether to verify files still exist on disk.
+                If False, no cleanup is performed.
+
+        Example:
+            >>> api = BitChuteAPI(enable_downloads=True)
+            >>> 
+            >>> # After manually deleting some downloaded files
+            >>> api.cleanup_download_database(verify_files=True)
+            >>> 
+            >>> # Check updated database info
+            >>> db_info = api.get_download_database_info()
+            >>> print(f"Database now contains {db_info['total_entries']} entries")
+        """
+        if self.enable_downloads and self.download_manager:
+            self.download_manager.cleanup_database(verify_files=verify_files)
+            if self.verbose:
+                logger.info("Download database cleanup completed")
+        elif self.verbose:
+            logger.warning("Downloads are not enabled, no database to clean up")
+
+
+    def get_combined_stats(self) -> Dict[str, Any]:
+        """Get comprehensive statistics combining API usage and download metrics.
+
+        Returns a unified statistics dictionary that includes both API request
+        statistics and download performance metrics for complete monitoring.
+
+        Returns:
+            Dict[str, Any]: Combined statistics including:
+                - api_stats: API request statistics (requests made, errors, etc.)
+                - download_stats: Download statistics (if downloads enabled)
+                - database_info: Download database information (if downloads enabled)
+                - session_info: Session timing and performance metrics
+
+        Example:
+            >>> api = BitChuteAPI(enable_downloads=True, verbose=True)
+            >>> 
+            >>> # Perform various operations
+            >>> trending = api.get_trending_videos('day', limit=20, download_thumbnails=True)
+            >>> search_results = api.search_videos('bitcoin', limit=50)
+            >>> 
+            >>> # Get comprehensive stats
+            >>> combined = api.get_combined_stats()
+            >>> 
+            >>> print("=== API Statistics ===")
+            >>> api_stats = combined['api_stats']
+            >>> print(f"Total requests: {api_stats['requests_made']}")
+            >>> print(f"Success rate: {api_stats['success_rate']:.1%}")
+            >>> 
+            >>> if combined['downloads_enabled']:
+            ...     print("\\n=== Download Statistics ===")
+            ...     dl_stats = combined['download_stats']
+            ...     print(f"Total downloads: {dl_stats['total_downloads']}")
+            ...     print(f"Files reused: {dl_stats['reused_downloads']}")
+            ...     print(f"Storage saved: {dl_stats['total_bytes_formatted']}")
+        """
+        # API statistics
+        api_stats = self.stats.copy()
+        
+        # Calculate API success rate
+        if api_stats["requests_made"] > 0:
+            api_stats["success_rate"] = (
+                (api_stats["requests_made"] - api_stats["errors"]) / 
+                api_stats["requests_made"]
+            )
+            api_stats["error_rate"] = api_stats["errors"] / api_stats["requests_made"]
+        else:
+            api_stats["success_rate"] = 0.0
+            api_stats["error_rate"] = 0.0
+
+        # Session information
+        current_time = time.time()
+        session_duration = current_time - api_stats.get("session_start_time", current_time)
+        
+        session_info = {
+            "session_duration_seconds": session_duration,
+            "session_duration_formatted": f"{session_duration / 60:.1f} minutes",
+            "requests_per_minute": (
+                api_stats["requests_made"] / (session_duration / 60) 
+                if session_duration > 0 else 0
+            ),
+            "last_request_time": api_stats.get("last_request_time", 0),
+        }
+
+        combined = {
+            "api_stats": api_stats,
+            "session_info": session_info,
+            "downloads_enabled": self.enable_downloads,
+        }
+
+        # Add download statistics if available
+        if self.enable_downloads and self.download_manager:
+            combined["download_stats"] = self.get_download_stats()
+            combined["database_info"] = self.get_download_database_info()
+        else:
+            combined["download_stats"] = {"downloads_enabled": False}
+            combined["database_info"] = {"downloads_enabled": False}
+
+        return combined
+
+
+    def print_stats_summary(self, show_detailed: bool = False):
+        """Print a formatted summary of API and download statistics.
+
+        Displays statistics in a user-friendly format with optional detailed
+        breakdown for comprehensive monitoring and debugging.
+
+        Args:
+            show_detailed: Whether to show detailed statistics breakdown.
+                If False, shows only key metrics summary.
+
+        Example:
+            >>> api = BitChuteAPI(enable_downloads=True, verbose=True)
+            >>> 
+            >>> # Perform operations
+            >>> videos = api.get_trending_videos('day', limit=50, download_thumbnails=True)
+            >>> 
+            >>> # Print summary
+            >>> api.print_stats_summary()
+            >>> 
+            >>> # Print detailed breakdown
+            >>> api.print_stats_summary(show_detailed=True)
+        """
+        stats = self.get_combined_stats()
+        
+        print("\n" + "="*50)
+        print("         BitChute API Statistics Summary")
+        print("="*50)
+        
+        # API Statistics
+        api_stats = stats["api_stats"]
+        print(f"🌐 API Requests:")
+        print(f"   Total requests: {api_stats['requests_made']:,}")
+        print(f"   Success rate: {api_stats['success_rate']:.1%}")
+        print(f"   Errors: {api_stats['errors']:,}")
+        
+        # Session Information
+        session_info = stats["session_info"]
+        print(f"\n⏱️  Session Info:")
+        print(f"   Duration: {session_info['session_duration_formatted']}")
+        print(f"   Requests/min: {session_info['requests_per_minute']:.1f}")
+        
+        # Download Statistics
+        if stats["downloads_enabled"]:
+            dl_stats = stats["download_stats"]
+            db_info = stats["database_info"]
+            
+            print(f"\n📥 Download Performance:")
+            print(f"   Total downloads: {dl_stats['total_downloads']:,}")
+            print(f"   Success rate: {dl_stats['success_rate']:.1%}")
+            print(f"   Files reused: {dl_stats['reused_downloads']:,} ({dl_stats['reuse_rate']:.1%})")
+            print(f"   Storage used: {dl_stats['total_bytes_formatted']}")
+            print(f"   Unique content: {dl_stats['unique_content_items']:,} items")
+            
+            if show_detailed:
+                print(f"\n📊 Detailed Breakdown:")
+                print(f"   Successful downloads: {dl_stats['successful_downloads']:,}")
+                print(f"   Failed downloads: {dl_stats['failed_downloads']:,}")
+                print(f"   Skipped downloads: {dl_stats['skipped_downloads']:,}")
+                print(f"   Database file: {db_info['database_file']}")
+                print(f"   Database size: {db_info['total_size_formatted']}")
+        else:
+            print(f"\n📥 Downloads: Disabled")
+        
+        print("="*50 + "\n")
+
 
     def reset_download_stats(self):
         """Reset download statistics to zero.
@@ -2694,6 +2963,76 @@ class BitChuteAPI:
         """
         if self.enable_downloads and self.download_manager:
             self.download_manager.reset_stats()
+
+    
+    def debug_token_issues(self) -> Dict[str, Any]:
+        """Debug token authentication issues with comprehensive analysis.
+        
+        Returns:
+            Dict containing complete debugging information and recommendations
+        """
+        if not hasattr(self, 'token_manager'):
+            return {"error": "Token manager not available"}
+        
+        print("🚨 BitChute API Token Debugging")
+        print("=" * 50)
+        
+        # Get comprehensive debug info
+        debug_info = self.token_manager.debug_token_status()
+        
+        # Add API-specific context
+        debug_info["api_context"] = {
+            "recent_requests": self.stats["requests_made"],
+            "recent_errors": self.stats["errors"],
+            "last_request_time": self.stats.get("last_request_time", 0),
+            "error_rate": self.stats["errors"] / max(1, self.stats["requests_made"])
+        }
+        
+        # Print summary
+        print(f"\n📊 Current Status:")
+        print(f"   Token available: {debug_info['token_info']['has_token']}")
+        print(f"   Token valid: {debug_info['token_info']['is_valid']}")
+        print(f"   API requests made: {debug_info['api_context']['recent_requests']}")
+        print(f"   API error rate: {debug_info['api_context']['error_rate']:.1%}")
+        
+        return debug_info
+
+
+    def fix_token_issues(self) -> bool:
+        """Attempt to automatically fix token authentication issues.
+        
+        Returns:
+            bool: True if token issues were resolved, False otherwise
+        """
+        if not hasattr(self, 'token_manager'):
+            print("❌ Token manager not available")
+            return False
+        
+        print("🔧 Attempting to fix token issues...")
+        
+        # Run comprehensive diagnosis and fix
+        fixed_token = self.token_manager.diagnose_and_fix()
+        
+        if fixed_token:
+            print(f"✅ Token issues resolved! New token: {fixed_token[:10]}...")
+            
+            # Test the fix with a simple API call
+            try:
+                print("🧪 Testing fix with API call...")
+                test_videos = self.get_trending_videos('day', limit=1)
+                if len(test_videos) > 0:
+                    print("✅ API test successful - fix confirmed!")
+                    return True
+                else:
+                    print("⚠️  API test returned no data - fix may be partial")
+                    return False
+            except Exception as e:
+                print(f"❌ API test failed: {e}")
+                return False
+        else:
+            print("❌ Unable to resolve token issues automatically")
+            return False
+
 
     def cleanup(self):
         """Clean up resources including sessions and download manager.
